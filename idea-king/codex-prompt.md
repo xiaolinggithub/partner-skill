@@ -82,7 +82,11 @@ Output format (fixed):
 - [unasked/unanswered question] — impact: [how the answer could change the verdict]
 (omit this section when clarification completed or nothing needed asking)
 
-Rules: answer only what was asked — no preamble, no closing remarks. P1 =
+Rules: answer only what was asked — no preamble, no closing remarks. This is
+analysis only — read the repo freely, but do NOT edit, create, or delete any
+files and do NOT write code; a fix belongs in `修改建议`, where the owner
+decides whether to apply it. Anything the briefing did not tell you goes in
+`未解疑问` with its impact, never into a guess dressed as an attack. P1 =
 would sink the plan, P2 = recoverable; never inflate. Ground every attack in
 the actual repo/files or stated constraints; tag evidence vs inference and
 never dress an inference as a fact. One strong attack beats several weak

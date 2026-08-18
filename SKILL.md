@@ -57,12 +57,99 @@ report proves they are live on the configured models.
 
 The helper scripts referenced below live in this skill's install directory (the directory containing this SKILL.md), not in the target repo. Resolve it once as `$PARTNER_DIR` — you know it from wherever this file was loaded; otherwise probe `~/.codex/skills/partner-skill`, `~/.claude/skills/partner-skill`, `~/.agents/skills/partner-skill`, or the local clone. All scripts accept running from any cwd; repo-dependent ones take `--repo`.
 
+## LOCAL NOTE — 本机安装拓扑（非上游内容，升级 partner-skill 时会被覆盖，请重新加回）
+
+本机三处 partner-skill 是 **一份实体 + 两个软链**，不是三份独立副本：
+
+```
+~/.agents/skills/partner-skill   ← 实体（唯一真身）
+~/.claude/skills/partner-skill   → ../../.agents/skills/partner-skill
+~/.codex/skills/partner-skill    → /Users/easy/.agents/skills/partner-skill
+```
+
+- **不要跑 `install.sh --target all`（也不要 `--target agents`）。** 它假设三处彼此独立：先把实体 `mv` 成 backup，再 `mkdir` 空目录，然后从 `$ROOT` 拷贝——而 `$ROOT` 此刻已经是指向那个空目录的悬空软链，于是把源目录清空，`set -e` 在随后的 `cp idea-king/codex-prompt.md` 处中止，后续步骤全不执行。2026-08-13 实际发生过一次，靠 `partner-skill.backup.<ts>` 完整还原。
+- 要装子技能就手工复制，不走脚本。`idea-king` 已按同样拓扑装好：实体在 `~/.agents/skills/idea-king`，`~/.claude/skills/idea-king` 是软链，Codex 侧 prompt 在 `~/.codex/prompts/idea-king.md`。
+- 因此 **`idea-king` 现在是可直接调用的独立技能**，不需要再去读 `idea-king/SKILL.md` 内联执行。Direction B 的分工方案在委派前必须过它这一关（四项攻击都要跑，尤其是"攻击委派包本身"那项），并输出含 `分工 (Assignment)` 的固定格式。
+
 ## Routing Rules
 
 - Route to Claude Code: architecture planning, implementation strategy, UI/interaction critique, final Codex Review, difficult product tradeoffs.
 - Route to Codex: scaffolding, implementation, long-context code edits, tests, build fixes, repository inspection, monitoring, summaries.
 - Route back to the same Claude Code session when UI quality matters or the first implementation passes technically but still needs product polish.
 - Keep Kimi Work/Kimi Code Goal separate from Claude Code `/goal`; prior "Goal mode" context may refer to Kimi, not Claude.
+
+## Delegation Contract
+
+Every handoff to another agent — a Codex background job, a Claude subagent,
+an arbiter call — obeys these four rules. They are cheap, and each one fails
+silently when skipped, which is why they are written down instead of assumed.
+
+**1. Brief with the fixed seven-part packet.** The receiving agent starts
+with zero context, so the packet is a self-contained briefing, not a pointer
+to this conversation:
+
+```markdown
+## Task
+[Imperative, one job.]
+
+## Context
+[Why this task exists, what it is part of.]
+
+## Relevant files
+- `path/to/file.ts` — [what it is and why it matters]
+
+## Current state
+[What is done, what works, what does not.]
+
+## What was tried
+- [Approach] — [why it failed or was abandoned]
+
+## Decisions
+- [Decision] — [rationale]
+
+## Acceptance criteria
+- [ ] [Checkable outcome]
+
+## Constraints
+- [Must-not / must-preserve]
+```
+
+`What was tried` and `Constraints` are the two sections that get dropped and
+the two that cost the most. Without the first, the agent re-walks a dead end
+you already paid for. Without the second, it "improves" something you needed
+frozen. Give file paths, not file contents: a pasted copy goes stale the
+moment the repo moves, and it burns the context the agent should spend
+reading the real thing.
+
+**2. Preserve task semantics verbatim.** Investigate-only → "DO NOT edit
+files." Fix → "implement the fix." Refactor → "refactor, not rewrite."
+Review → "report findings, do not apply them." The delegated task is the
+user's task, not your paraphrase of it; the packet carries the original
+intent including its limits. Semantic drift at the boundary is the most
+common way a correct plan produces a wrong diff.
+
+**3. Analysis-only jobs end with the no-edits constant.** Any job that must
+not touch the repo — the idea-king gate, an arbiter call, a review pass, a
+second opinion — ends its prompt with this exact string, copied, not
+reworded:
+
+```
+This is analysis only. Do NOT edit, create, or delete any files. Do NOT write code.
+```
+
+A fixed constant is greppable and can be checked before send; an ad-hoc
+sentence cannot. Belt and braces: pair it with the sandbox flag
+(`delegate-codex.sh --read-only`) so the constraint still holds when the
+model ignores prose.
+
+**4. Do not poll a running job.** Codex background jobs and Claude-backed
+planning runs take 10-30+ minutes routinely. Monitor on the interval the
+adapter defines and otherwise go idle: no hurry-up prompts, no "status?"
+re-prompts, no interrupting a working job to ask how it is going. Waiting is
+not stalling. When you do look, look at evidence rather than progress — a job
+that reports `DONE` with an empty `git status --short` was most likely never
+allowed to write (see `--writable` in `references/claude-driven.md`), and no
+amount of polling would have surfaced that.
 
 ## Bounded Claude Planning
 

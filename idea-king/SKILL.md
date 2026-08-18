@@ -119,6 +119,41 @@ shared understanding:
   with the fixed output format below so the session still ends in a
   verdict, survivors, and changes.
 
+## Delegated Runs (被委派执行)
+
+Partner Direction B and any "get me a second opinion" flow run this skill in
+a *separate* agent — often on the other vendor. Two sides, two contracts.
+
+**When you are the caller (dispatching idea-king to another agent):**
+
+- Contrast is the point. Send the gate to a different provider family from
+  the one that wrote the plan. A reviewer that shares the planner's priors
+  reproduces the planner's blind spots, and a same-family review that
+  returns `ship` is worth less than it looks.
+- Brief for zero context. The reviewer cannot see this conversation: state
+  the plan, the constraints, what was already ruled out and why, and give
+  repo paths — never pasted file bodies, which go stale and crowd out the
+  reading the reviewer should do itself.
+- End the prompt with the no-edits constant below, verbatim, and back it
+  with the read-only sandbox flag (`delegate-codex.sh --read-only`). Prose
+  alone is a request; the flag is the guarantee.
+- Do not poll. A real adversarial pass runs 10-30+ minutes. Wait for the
+  finish signal; hurry-ups only truncate the reasoning you paid for.
+
+**When you are the reviewer (running as the delegated agent):**
+
+- You are read-only, always. Attacking a plan never requires touching the
+  repo — read anything, change nothing, propose fixes in `修改建议` instead
+  of applying them. This holds even if the briefing forgot to say so.
+- The briefing is your whole world. Anything it did not tell you goes in
+  `未解疑问` with its impact, not into a guess dressed as an attack.
+
+The constant, for copying:
+
+```
+This is analysis only. Do NOT edit, create, or delete any files. Do NOT write code.
+```
+
 ## Output Format (fixed, all modes)
 
 ```markdown
@@ -158,6 +193,10 @@ completed or nothing needed asking.
 ## Rules
 
 - Answer only what was asked — no preamble, no closing remarks.
+- Read-only, in every mode. Read the repo freely; do not edit, create, or
+  delete files, and do not write code. A fix belongs in `修改建议`, where
+  the owner decides whether to apply it — a reviewer who patches the thing
+  under review destroys the evidence and stops being a reviewer.
 - Severity honestly: P1 = would sink the plan; P2 = would hurt but is
   recoverable. Never inflate.
 - Grounding: every attack must be defensible from the actual repo, files,
