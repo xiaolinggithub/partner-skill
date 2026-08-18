@@ -59,24 +59,31 @@ The helper scripts referenced below live in this skill's install directory (the 
 
 ## LOCAL NOTE — 本机安装拓扑与来源（非上游内容）
 
-**来源已改为自有 fork。** `~/.agents/.skill-lock.json` 里 partner-skill 的
-`source` 指向 `xiaolinggithub/partner-skill`（2026-08-18 起），不再是
-`LearnPrompt/partner-skill`。所以 `npx skills update` 从 fork 拉，本地改动
-不会再被覆盖；本节和 Delegation Contract 都已 commit 进 fork。想同步上游时
-在 `~/dev/partner-skill-fork` 里 `git fetch upstream && git merge upstream/main`，
-解决冲突后 push，再跑 update。
+**来源已改为自有 fork，且 git 仓库就在安装目录里。** `~/.agents/.skill-lock.json`
+里 partner-skill 的 `source` 指向 `xiaolinggithub/partner-skill`（2026-08-18 起），
+不再是 `LearnPrompt/partner-skill`，所以 `npx skills update` 从 fork 拉，本地改动
+不会被覆盖。安装实体 `~/.agents/skills/partner-skill` 本身就是那个 fork 的工作树
+（`origin`=fork，`upstream`=LearnPrompt），没有第二份副本，改完直接在这里
+`git commit && git push`。同步上游：`git fetch upstream && git merge upstream/main`，
+解冲突后 push。
 
-本机三处 partner-skill 是 **一份实体 + 两个软链**，不是三份独立副本：
+**全机只有一份实体，其余全是软链**：
 
 ```
-~/.agents/skills/partner-skill   ← 实体（唯一真身）
-~/.claude/skills/partner-skill   → ../../.agents/skills/partner-skill
-~/.codex/skills/partner-skill    → /Users/easy/.agents/skills/partner-skill
+~/.agents/skills/partner-skill            ← 唯一实体，同时是 fork 的 git 工作树
+~/.claude/skills/partner-skill            → ../../.agents/skills/partner-skill
+~/.codex/skills/partner-skill             → /Users/easy/.agents/skills/partner-skill
+~/.agents/skills/partner-skill/idea-king  ← idea-king 的唯一实体（在仓库内）
+~/.agents/skills/idea-king                → partner-skill/idea-king
+~/.claude/skills/idea-king                → ../../.agents/skills/idea-king（二级链）
+~/.codex/prompts/idea-king.md             → …/partner-skill/idea-king/codex-prompt.md
 ```
 
-- **不要跑 `install.sh --target all`（也不要 `--target agents`）。** 它假设三处彼此独立：先把实体 `mv` 成 backup，再 `mkdir` 空目录，然后从 `$ROOT` 拷贝——而 `$ROOT` 此刻已经是指向那个空目录的悬空软链，于是把源目录清空，`set -e` 在随后的 `cp idea-king/codex-prompt.md` 处中止，后续步骤全不执行。2026-08-13 实际发生过一次，靠 `partner-skill.backup.<ts>` 完整还原。
-- 要装子技能就手工复制，不走脚本。`idea-king` 已按同样拓扑装好：实体在 `~/.agents/skills/idea-king`，`~/.claude/skills/idea-king` 是软链，Codex 侧 prompt 在 `~/.codex/prompts/idea-king.md`。
-- 因此 **`idea-king` 现在是可直接调用的独立技能**，不需要再去读 `idea-king/SKILL.md` 内联执行。Direction B 的分工方案在委派前必须过它这一关（四项攻击都要跑，尤其是"攻击委派包本身"那项），并输出含 `分工 (Assignment)` 的固定格式。
+- **不要跑 `install.sh --target all`（也不要 `--target agents`）。** 它假设各处彼此独立：先把实体 `mv` 成 backup，再 `mkdir` 空目录，然后从 `$ROOT` 拷贝——而 `$ROOT` 此刻已经是指向那个空目录的悬空软链，于是把源目录清空，`set -e` 在随后的 `cp idea-king/codex-prompt.md` 处中止，后续步骤全不执行。2026-08-13 实际发生过一次，靠 `partner-skill.backup.<ts>` 完整还原。现在实体里还带着 `.git`，跑它的代价更高。
+- 装子技能一律手工建软链，不走脚本。
+- **`idea-king` 是可直接调用的独立技能**，不需要再去读 `idea-king/SKILL.md` 内联执行。Direction B 的分工方案在委派前必须过它这一关（四项攻击都要跑，尤其是"攻击委派包本身"那项），并输出含 `分工 (Assignment)` 的固定格式。
+- 改 idea-king 只改仓库内那一份（`partner-skill/idea-king/`）；`SKILL.md` 与
+  `codex-prompt.md` 是两个不同文件（后者是给 Codex 的精简版），规则改动要两个都过一遍。
 
 ## Routing Rules
 
