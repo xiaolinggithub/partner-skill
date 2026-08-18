@@ -57,7 +57,14 @@ report proves they are live on the configured models.
 
 The helper scripts referenced below live in this skill's install directory (the directory containing this SKILL.md), not in the target repo. Resolve it once as `$PARTNER_DIR` — you know it from wherever this file was loaded; otherwise probe `~/.codex/skills/partner-skill`, `~/.claude/skills/partner-skill`, `~/.agents/skills/partner-skill`, or the local clone. All scripts accept running from any cwd; repo-dependent ones take `--repo`.
 
-## LOCAL NOTE — 本机安装拓扑（非上游内容，升级 partner-skill 时会被覆盖，请重新加回）
+## LOCAL NOTE — 本机安装拓扑与来源（非上游内容）
+
+**来源已改为自有 fork。** `~/.agents/.skill-lock.json` 里 partner-skill 的
+`source` 指向 `xiaolinggithub/partner-skill`（2026-08-18 起），不再是
+`LearnPrompt/partner-skill`。所以 `npx skills update` 从 fork 拉，本地改动
+不会再被覆盖；本节和 Delegation Contract 都已 commit 进 fork。想同步上游时
+在 `~/dev/partner-skill-fork` 里 `git fetch upstream && git merge upstream/main`，
+解决冲突后 push，再跑 update。
 
 本机三处 partner-skill 是 **一份实体 + 两个软链**，不是三份独立副本：
 
