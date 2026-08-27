@@ -148,11 +148,12 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(2, status)
         self.assertIn("backend=claude", error)
 
+        # max used to be claude-only; third-party codex models (GLM, DeepSeek)
+        # expose it too, so codex+max is now a legal pairing.
         choices["deep_reasoner"] = ("claude", "opus", "high")
         choices["fast_worker"] = ("codex", "gpt-detected", "max")
         status, _, error = self.run_cli(*self.custom_args(choices, action="--preview"))
-        self.assertEqual(2, status)
-        self.assertIn("backend=codex", error)
+        self.assertEqual((0, ""), (status, error))
 
     def test_apply_is_idempotent_for_config_and_agents(self):
         self.assertEqual(0, self.run_cli(*self.claude_args())[0])

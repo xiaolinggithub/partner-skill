@@ -40,7 +40,7 @@ EXCLUDE_CHOICES = ("git-exclude", "self", "track")
 ROUTING_ACTIONS = ("none", "write", "remove")
 CLAUDE_MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku")
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 IDENTITY_META = {
     "deep_reasoner": {
         "label": "深度推理",

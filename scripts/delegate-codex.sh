@@ -24,7 +24,7 @@ delegate-codex.sh — background Codex jobs for the Claude-driven Partner flow
 
 Usage:
   delegate-codex.sh submit --repo <path> --prompt-file <file>
-                    [--label <name>] [--effort minimal|low|medium|high|xhigh]
+                    [--label <name>] [--effort minimal|low|medium|high|xhigh|max]
                     [--model <model>] [--role deep_reasoner|fast_worker|arbiter]
                     [--host claude_code|codex]
                     [--read-only|--writable] [--dry-run]
@@ -249,7 +249,7 @@ cmd_submit() {
   fi
   [ "$MODEL_EXPLICIT" = "false" ] || MODEL_SOURCE="explicit"
   [ "$EFFORT_EXPLICIT" = "false" ] || EFFORT_SOURCE="explicit"
-  case "$EFFORT" in minimal|low|medium|high|xhigh) ;; *) die "invalid --effort: $EFFORT" ;; esac
+  case "$EFFORT" in minimal|low|medium|high|xhigh|max) ;; *) die "invalid --effort: $EFFORT" ;; esac
   resolve_codex_bin
 
   LABEL="$(echo "$LABEL" | tr -cs 'A-Za-z0-9_-' '-' | sed 's/^-//;s/-$//')"

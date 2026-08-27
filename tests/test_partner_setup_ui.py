@@ -141,7 +141,7 @@ class SetupUITests(unittest.TestCase):
         self.assertEqual(
             {
                 "claude": ["low", "medium", "high", "xhigh", "max"],
-                "codex": ["minimal", "low", "medium", "high", "xhigh"],
+                "codex": ["minimal", "low", "medium", "high", "xhigh", "max"],
             },
             state["efforts_by_backend"],
         )

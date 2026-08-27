@@ -36,7 +36,7 @@ SPEC.loader.exec_module(partner_config)
 IDENTITIES = partner_config.IDENTITIES
 BACKENDS = partner_config.BACKENDS
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 BACKEND_EFFORTS = {
     "claude": CLAUDE_EFFORTS,
     "codex": CODEX_EFFORTS,
