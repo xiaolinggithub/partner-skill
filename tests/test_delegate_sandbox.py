@@ -98,6 +98,26 @@ class DelegateSandboxTests(unittest.TestCase):
         )
         return result
 
+    def test_relative_codex_path_survives_changing_to_target_repo(self):
+        root, repo, prompt, fake_codex, env = self.workspace()
+        env["PARTNER_CODEX_BIN"] = "./codex"
+        result = subprocess.run(
+            ["bash", str(ROOT / SCRIPT), "submit", "--repo", str(repo),
+             "--prompt-file", str(prompt), "--read-only"],
+            cwd=root, env=env, text=True, capture_output=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        job = repo / ".partner/jobs" / result.stdout.strip()
+        for _ in range(50):
+            if (job / "exit_code").exists():
+                break
+            time.sleep(0.1)
+        self.assertEqual("0", (job / "exit_code").read_text().strip(),
+                         (job / "stderr.log").read_text())
+        meta = self.parsed((job / "meta").read_text())
+        self.assertEqual(str(fake_codex.resolve()), meta["codex_bin"])
+        self.assertIn("test-session-0001", (job / "log.jsonl").read_text())
+
     def test_dry_run_reports_codex_default_sandbox_without_flags(self):
         result = self.dry_run()
         self.assertEqual((0, ""), (result.returncode, result.stderr))

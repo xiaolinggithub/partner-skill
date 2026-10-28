@@ -32,6 +32,9 @@ def stop_group(process: subprocess.Popen) -> None:
             os.killpg(process.pid, 0)
         except ProcessLookupError:
             return
+        except PermissionError:
+            # Retry after poll() reaps a leader that exited just before the probe.
+            pass
         time.sleep(0.05)
     try:
         os.killpg(process.pid, signal.SIGKILL)

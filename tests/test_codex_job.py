@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import signal
 import subprocess
@@ -8,10 +9,16 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "run-codex-job.py"
+SPEC = importlib.util.spec_from_file_location("codex_job", SCRIPT)
+codex_job = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+sys.modules[SPEC.name] = codex_job
+SPEC.loader.exec_module(codex_job)
 
 
 class CodexJobTests(unittest.TestCase):
@@ -94,6 +101,33 @@ class CodexJobTests(unittest.TestCase):
         self.assertEqual("wall_timeout", self.metadata()["failure_kind"])
         self.assertLess(time.monotonic() - started, 5)
         self.assert_stopped()
+
+    def test_cleanup_reaps_leader_after_probe_permission_race(self):
+        process = mock.Mock(pid=1234)
+        process.poll.side_effect = [None, 0]
+        # macOS can reject the probe if the leader exits just after poll().
+        with mock.patch.object(codex_job.os, "killpg", side_effect=[
+            None, PermissionError(1, "Operation not permitted"), ProcessLookupError(),
+        ]) as killpg, mock.patch.object(codex_job.time, "sleep"), \
+                mock.patch.object(codex_job.time, "monotonic", side_effect=[0, 0, 0.1]):
+            codex_job.stop_group(process)
+        self.assertEqual(2, process.poll.call_count)
+        self.assertEqual([
+            mock.call(process.pid, signal.SIGTERM),
+            mock.call(process.pid, 0),
+            mock.call(process.pid, 0),
+        ], killpg.call_args_list)
+
+    def test_cleanup_still_fails_when_termination_permission_is_denied(self):
+        process = mock.Mock(pid=1234)
+        with mock.patch.object(codex_job.os, "killpg", side_effect=[
+            None, PermissionError(1, "Operation not permitted"),
+            PermissionError(1, "Operation not permitted"),
+        ]) as killpg, mock.patch.object(codex_job.time, "sleep"), \
+                mock.patch.object(codex_job.time, "monotonic", side_effect=[0, 0, 2]):
+            with self.assertRaises(PermissionError):
+                codex_job.stop_group(process)
+        killpg.assert_any_call(process.pid, signal.SIGKILL)
 
     def test_cancel_signal_reaches_children_and_records_cancelled(self):
         process = subprocess.Popen(self.command(self.spawn_grandchild_code()),

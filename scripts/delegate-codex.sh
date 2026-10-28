@@ -133,6 +133,9 @@ resolve_codex_bin() {
   fi
   [ -n "$candidate" ] && [ -x "$candidate" ] || die "codex CLI not found; install it or set PARTNER_CODEX_BIN"
 
+  if [[ "$candidate" != /* ]]; then
+    candidate="$(cd "$(dirname "$candidate")" && pwd -P)/$(basename "$candidate")"
+  fi
   CODEX_BIN="$candidate"
   CODEX_VERSION="$("$CODEX_BIN" --version 2>/dev/null | head -1 || true)"
   CODEX_VERSION="${CODEX_VERSION:-unknown}"
