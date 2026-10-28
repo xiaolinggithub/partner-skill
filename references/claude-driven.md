@@ -183,7 +183,11 @@ claude-backend identity through the wrong CLI.
 ## Phase 4 — Full Review Gate
 
 - Collect each finished job:
-  `bash "$PARTNER_DIR/scripts/delegate-codex.sh" result <jobId> --repo "$REPO"`.
+  `bash "$PARTNER_DIR/scripts/delegate-codex.sh" result <jobId> --repo "$REPO" --json`.
+  Use `execution.returncode` and `execution.elapsed_seconds` for process outcome
+  and actual runtime; missing evidence stays unknown. `meta` is key/value text,
+  not JSON. Keep requested/observed models separate. For fixed identity tryouts,
+  use `partner-tryout.py` rather than assembling a new collector or validator.
 - The driver performs one complete acceptance review, combining any relevant
   polish with correctness review. Include staged, unstaged and untracked changes,
   scoped against the starting baseline, plus the relevant check. After a fix,

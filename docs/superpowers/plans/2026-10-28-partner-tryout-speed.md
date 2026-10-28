@@ -31,21 +31,21 @@
 ### Task 2: Fixed dispatch and collection
 **Files:** Extend `scripts/partner-tryout.py`, `tests/test_partner_tryout.py`.
 **Interfaces:** `start --host HOST --repo REPO [--role ROLE]` produces a durable run manifest and native-agent packets; `collect RUN --wait-seconds N [--agent-result ROLE=PATH]` reads actual result evidence and preserves incomplete jobs.
-- [ ] Add fixture tests for unchanged prompts, concurrent Codex dispatch, native Claude routing, missing configuration, failed/partial submission and bounded waits without restarting jobs.
-- [ ] Implement using existing `partner-config.py` resolution and `delegate-codex.sh submit/status/result --json`; keep durable IDs before collection.
-- [ ] Add collection tests for nonzero/incomplete execution, unknown model evidence, actual job timings and native-agent results.
-- [ ] Run the new suite through RED/GREEN for each behavior; inspect original completed jobs read-only through the collector.
+- [x] Add fixture tests for unchanged prompts, concurrent Codex dispatch, native Claude routing, missing configuration, failed/partial submission and bounded waits without restarting jobs.
+- [x] Implement using existing `partner-config.py` resolution and `delegate-codex.sh submit/status/result --json`; keep durable IDs before collection.
+- [x] Add collection tests for nonzero/incomplete execution, unknown model evidence, actual job timings and native-agent results.
+- [x] Run the new suite through RED/GREEN for each behavior; inspect original completed jobs read-only through the collector.
 
 ### Task 3: Acceptance, receipts and host instructions
 **Files:** Extend the helper/tests; update `references/tryout.md`, relevant adapter/Core instructions, README parity entries, package checks and CI syntax entries.
 **Interface:** A finalization command consumes collected evidence and explicit driver reasoning decisions, reuses `make-receipt.py`, and emits scope-correct verification commands without silently writing configuration.
-- [ ] Test strict-failure preservation, pending reasoning acceptance, stale verification timestamps, scope-correct write commands and permission-denied write reporting.
-- [ ] Replace exploratory tryout directions with the fixed start/Agent/collect/finalize sequence; retain every quality gate.
-- [ ] Run `python3 -m unittest discover -s tests`, `bash scripts/check-skill-repo.sh .`, syntax checks and `git diff --check`.
+- [x] Test strict-failure preservation, pending reasoning acceptance, stale verification timestamps, scope-correct write commands and permission-denied write reporting.
+- [x] Replace exploratory tryout directions with the fixed start/Agent/collect/finalize sequence; retain every quality gate.
+- [x] Run `python3 -m unittest discover -s tests`, `bash scripts/check-skill-repo.sh .`, syntax checks and `git diff --check`.
 
 ### Task 4: Independent review and live timing
 **Files:** Record evidence in a concise validation document, without credentials or private transcript content.
-- [ ] Obtain one fresh-context whole-branch review; address material findings with targeted regression coverage.
+- [x] Obtain one fresh-context whole-branch review; address material findings with targeted regression coverage.
 - [ ] Execute the approved real Claude-driven tryout using unchanged configured identities and original tasks.
 - [ ] Record stage timings and verdicts; compare to 546.5 seconds total / 499 seconds outside the execution window.
 - [ ] Investigate until an actual improvement is demonstrated without weakening the gates; do not mark the active goal complete from fixture checks alone.
@@ -56,4 +56,8 @@
 - Existing isolated worktree reused; branch `codex/partner-tryout-speed`, base `7d12a2e`.
 - No product changes or live model calls made at plan creation.
 - Task 1: complete. Five test methods with literal positive/negative fixtures passed after observing assertion failures; full suite 138 tests passed in 68.338 seconds. Read-only replay of the supplied completed job produced `passed=false`, `format_valid=false`, `content_valid=true`, `keys_sorted=true`, `errors=[markdown_fence]`.
-- Task 2 is next. The new module currently contains acceptance functions only; no dispatch/collection CLI or receipt integration exists yet. No live speedup claim is justified.
+- Tasks 2/3 implementation: fixed start/collect/finalize entry point, per-role scope and explicit verification commands, existing receipt generator and updated host/package instructions. Read-only replay preserves the supplied fast-worker fence failure and the arbiter's pending judgment.
+- Ruling: reuse sequential submissions to the existing asynchronous delegate rather than introduce another concurrency layer; the actual jobs overlap. The native Agent remains the host's responsibility. A partial start is collectable and never automatically resubmits.
+- First full suite after Tasks 2/3: 146 tests passed in 67.775 seconds. Package checks fail=0, warn=1 (pre-existing risky-text warning); README parity and 36 static prompt checks passed. Python syntax checked with a cache file inside .partner because the system cache directory is outside the sandbox.
+- Fresh independent review found two material defects: invalid receipt phase and undispatched roles missing state after interruption. Both were reproduced by failing tests, then fixed; all 16 tryout tests passed. Final full suite: 149 tests passed in 61.317 seconds. An earlier run hit an intermittent sandbox permission error in an unchanged process-cleanup test; its 29-test module and the final full suite both passed on rerun.
+- Real Claude-driven trial launched with normal auto permissions, unchanged default driver routing and configured identities. Its timing and any permissions/output failures will be recorded before completion. No speedup claim yet.

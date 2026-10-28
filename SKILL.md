@@ -70,7 +70,7 @@ freely mixed across vendors. Their values live only in
 (global) — schema in `docs/config-schema.md`; never duplicate them into
 prompts or docs. On "搭子，试跑", run the identity tryout in
 `references/tryout.md`: each identity executes one micro-task and the
-report distinguishes requested and observed models, actual elapsed time, and output validity. A dry-run configuration check is not a live verification.
+report distinguishes requested and observed models, actual elapsed time, and output validity. Use `scripts/partner-tryout.py start/collect/finalize` for the fixed orchestration and strict validator; the driver still judges reasoning and route evidence. A dry-run configuration check is not a live verification.
 
 ## Tool Location
 

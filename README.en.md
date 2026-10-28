@@ -270,6 +270,7 @@ scripts/validate-receipt.py             Validates Partner Session Receipt fields
 scripts/run-test-prompts.py             Static checks plus experimental live mode for the regression prompts
 scripts/run-claude-plan.py              Runs the bounded configured Claude planner and saves sanitized events/checkpoint/cost
 scripts/run-codex-job.py         Runs delegated commands with timing, wall limits and workspace writer locks
+scripts/partner-tryout.py        Fixed tryout dispatch, strict acceptance, evidence collection and receipts
 scripts/delegate-codex.sh               Codex background-job primitive: submit / status / result / resume / cancel
 scripts/partner-config.py               Config engine: TOML-subset parsing, deterministic writes, locking (schema v2)
 scripts/partner_runtime.py              Shared Claude child-process environment boundary for first-party OAuth

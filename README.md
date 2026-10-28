@@ -269,6 +269,7 @@ scripts/validate-receipt.py      校验 Partner Session Receipt 的字段与取�
 scripts/run-test-prompts.py      行为回归 prompt 的静态检查与实验性 live 模式
 scripts/run-claude-plan.py       按配置运行 bounded Claude planner，保存 sanitized events/checkpoint/cost
 scripts/run-codex-job.py         运行委派命令，记录耗时并限制超时和并发写入
+scripts/partner-tryout.py        固定试跑提交、严格校验、结果收集与回执
 scripts/delegate-codex.sh        Codex 后台任务原语：submit / status / result / resume / cancel
 scripts/partner-config.py        配置引擎：TOML 子集解析、确定性写回、锁与原子写（schema v2）
 scripts/partner_runtime.py       Claude 子进程共享环境边界，避免宿主变量污染一方 OAuth

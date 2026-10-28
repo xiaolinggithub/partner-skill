@@ -76,6 +76,7 @@ FILE_MAP_ENTRIES = [
     "scripts/run-test-prompts.py",
     "scripts/run-claude-plan.py",
     "scripts/run-codex-job.py",
+    "scripts/partner-tryout.py",
     "scripts/delegate-codex.sh",
     "scripts/partner-config.py",
     "scripts/partner_runtime.py",
