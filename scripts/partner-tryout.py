@@ -127,20 +127,68 @@ def start(repo, host, selected):
     return path, run
 
 
-def collect(path, wait_seconds, agent_results):
+def native_transcript(path, role):
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    first = next((row for row in rows if row.get('type') == 'user'), {})
+    if first.get('message', {}).get('content') != task_prompt(role):
+        raise ValueError('native transcript does not contain this role\'s exact task')
+    evidence = {'source': str(path), 'completed': False, 'observed_models': [],
+                'execution': {'returncode': None, 'elapsed_seconds': None}}
+    handback = None
+    for row in rows:
+        message = row.get('message', {})
+        if row.get('type') == 'assistant' and message.get('model'):
+            model = message['model']
+            if model not in evidence['observed_models']:
+                evidence['observed_models'].append(model)
+        content = message.get('content', [])
+        for block in content if isinstance(content, list) else []:
+            if row.get('type') == 'assistant' and block.get('type') == 'tool_use' and block.get('name') == 'SubagentHandback':
+                handback = block['id']
+                evidence['agent_message'] = block['input']['message']
+                evidence.update(completed=False, execution={'returncode': None, 'elapsed_seconds': None})
+            if (row.get('type') == 'user' and block.get('type') == 'tool_result'
+                    and handback and block.get('tool_use_id') == handback):
+                # shortcut: only a confirmed handback proves completion; other hosts use explicit Agent evidence.
+                result = block.get('content', [])
+                raw = result if isinstance(result, str) else ''.join(
+                    part.get('text', '') for part in result if part.get('type') == 'text')
+                try:
+                    success = json.loads(raw).get('success') is True and not block.get('is_error')
+                except (ValueError, AttributeError):
+                    success = False
+                evidence['completed'] = bool(success)
+                evidence['execution']['returncode'] = 0 if success else None
+                if success:
+                    try:
+                        start = datetime.fromisoformat(first['timestamp'].replace('Z', '+00:00'))
+                        end = datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00'))
+                        if end >= start:
+                            evidence['execution'].update(started_at=first['timestamp'],
+                                finished_at=row['timestamp'], elapsed_seconds=(end - start).total_seconds())
+                    except (KeyError, ValueError, TypeError):
+                        pass
+    return evidence
+
+
+def collect(path, wait_seconds, agent_results, agent_transcripts=None):
     if not 0 <= wait_seconds <= 60:
         raise ValueError("wait-seconds must be between 0 and 60; collect again to keep waiting")
     run = json.loads(path.read_text())
-    if set(agent_results) - set(run["roles"]):
+    agent_transcripts = agent_transcripts or {}
+    if set(agent_results) & set(agent_transcripts):
+        raise ValueError("use one native evidence source per role")
+    if (set(agent_results) | set(agent_transcripts)) - set(run["roles"]):
         raise ValueError("agent-result names a role outside this run")
     deadline = time.monotonic() + wait_seconds
     while True:
         running = False
         for role, row in run["roles"].items():
-            if role in agent_results:
+            if role in agent_results or role in agent_transcripts:
                 if row["backend"] != "claude":
                     raise ValueError("agent-result cannot replace a Codex job")
-                evidence = json.loads(Path(agent_results[role]).read_text())
+                evidence = (native_transcript(Path(agent_transcripts[role]), role)
+                            if role in agent_transcripts else json.loads(Path(agent_results[role]).read_text()))
                 if not isinstance(evidence.get("completed"), bool) or not evidence.get("source"):
                     raise ValueError("native evidence requires completed boolean and source")
                 evidence.setdefault("execution", {}).setdefault("elapsed_seconds", None)
@@ -311,6 +359,7 @@ def main():
     gather.add_argument('run', type=Path)
     gather.add_argument('--wait-seconds', type=int, default=0)
     gather.add_argument('--agent-result', action='append', default=[], metavar='ROLE=JSON_FILE')
+    gather.add_argument('--agent-transcript', action='append', default=[], metavar='ROLE=JSONL_FILE')
     finish = sub.add_parser('finalize', help='Record acceptance, generate explicit update commands and a receipt.')
     finish.add_argument('run', type=Path)
     finish.add_argument('--judgments', type=Path, required=True)
@@ -326,7 +375,10 @@ def main():
             entries = [value.split('=', 1) for value in args.agent_result]
             if any(len(entry) != 2 for entry in entries) or len(dict(entries)) != len(entries):
                 raise ValueError('agent-result must contain distinct ROLE=JSON_FILE entries')
-            run = collect(path, args.wait_seconds, dict(entries))
+            transcripts = [value.split('=', 1) for value in args.agent_transcript]
+            if any(len(entry) != 2 for entry in transcripts) or len(dict(transcripts)) != len(transcripts):
+                raise ValueError('agent-transcript must contain distinct ROLE=JSONL_FILE entries')
+            run = collect(path, args.wait_seconds, dict(entries), dict(transcripts))
         else:
             path = args.run
             run = finalize(path, json.loads(args.judgments.read_text()))

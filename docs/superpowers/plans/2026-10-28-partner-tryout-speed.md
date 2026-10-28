@@ -46,13 +46,13 @@
 ### Task 4: Independent review and live timing
 **Files:** Record evidence in a concise validation document, without credentials or private transcript content.
 - [x] Obtain one fresh-context whole-branch review; address material findings with targeted regression coverage.
-- [ ] Execute the approved real Claude-driven tryout using unchanged configured identities and original tasks.
-- [ ] Record stage timings and verdicts; compare to 546.5 seconds total / 499 seconds outside the execution window.
-- [ ] Investigate until an actual improvement is demonstrated without weakening the gates; do not mark the active goal complete from fixture checks alone.
-- [ ] Commit the verified result. Shared installation updates and remote-main publication require their own authorization.
+- [x] Execute the approved real Claude-driven tryout using unchanged configured identities and original tasks.
+- [x] Record stage timings and verdicts; compare to 546.5 seconds total / 499 seconds outside the execution window.
+- [x] Investigate until an actual improvement is demonstrated without weakening the gates; do not mark the active goal complete from fixture checks alone.
+- [x] Commit the verified result. Shared installation updates and remote-main publication require their own authorization.
 
 ## Execution record
-- Design approved by the user; native implementation selected to avoid per-task handoff overhead. One independent branch review remains required.
+- Design approved by the user; native implementation selected to avoid per-task handoff overhead. Independent branch review and supplemental transcript review completed.
 - Existing isolated worktree reused; branch `codex/partner-tryout-speed`, base `7d12a2e`.
 - No product changes or live model calls made at plan creation.
 - Task 1: complete. Five test methods with literal positive/negative fixtures passed after observing assertion failures; full suite 138 tests passed in 68.338 seconds. Read-only replay of the supplied completed job produced `passed=false`, `format_valid=false`, `content_valid=true`, `keys_sorted=true`, `errors=[markdown_fence]`.
@@ -60,4 +60,9 @@
 - Ruling: reuse sequential submissions to the existing asynchronous delegate rather than introduce another concurrency layer; the actual jobs overlap. The native Agent remains the host's responsibility. A partial start is collectable and never automatically resubmits.
 - First full suite after Tasks 2/3: 146 tests passed in 67.775 seconds. Package checks fail=0, warn=1 (pre-existing risky-text warning); README parity and 36 static prompt checks passed. Python syntax checked with a cache file inside .partner because the system cache directory is outside the sandbox.
 - Fresh independent review found two material defects: invalid receipt phase and undispatched roles missing state after interruption. Both were reproduced by failing tests, then fixed; all 16 tryout tests passed. Final full suite: 149 tests passed in 61.317 seconds. An earlier run hit an intermittent sandbox permission error in an unchanged process-cleanup test; its 29-test module and the final full suite both passed on rerun.
-- Real Claude-driven trial launched with normal auto permissions, unchanged default driver routing and configured identities. Its timing and any permissions/output failures will be recorded before completion. No speedup claim yet.
+- Real Claude-driven trial launched with normal auto permissions, unchanged default driver routing and configured identities. First-trial timing and output outcomes are recorded in the validation document.
+
+- First live trial completed in 530.431 seconds versus 546.461 seconds baseline (only 2.9% lower). Preparation improved, but the driver still manually grepped native transcript models, rewrote evidence and rediscovered finalize flags. This is limited improvement, not evidence of the intended large reduction.
+- Ruling: accept native transcript paths directly in the existing collector, because the live trace showed evidence extraction remained a deterministic task delegated to the model. Keep explicit native JSON as the fallback for hosts without confirmed SubagentHandback; no guessed completion or model identity. The added parser is deliberately limited to the observed Claude transcript contract.
+- Native transcript checks cover exact task matching, observed-versus-requested models, confirmed completion, missing timing, partial/failed results, and rejecting source conflicts or Codex replacement. Supplemental independent review found stale success carried into a subsequent handback; a regression failed before resetting completion/timing per handback and passed afterward. All 21 targeted tests passed.
+- Second live trial runs with the same driver route, role configuration, task prompts and normal permissions; it uses transcript collection directly. Final regression: 154 tests passed in 64.001 seconds; static checks and README parity passed. Final end-to-end time 232.620s versus 546.461s baseline (57.4% lower); outside-execution time 184.908s. See `2026-10-28-partner-tryout-speed-validation.md`.

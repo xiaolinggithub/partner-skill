@@ -1,7 +1,7 @@
 # Shorten Partner orchestration without weakening acceptance
 
 Status: approved for direct implementation and autonomous verification by the user;
-live improvement is not yet demonstrated.
+live improvement demonstrated in the final controlled tryout; see the validation record.
 
 ## Objective and baseline
 

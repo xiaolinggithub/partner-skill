@@ -152,6 +152,87 @@ class TryoutWorkflowTests(unittest.TestCase):
         self.assertEqual(run["roles"]["deep_reasoner"]["state"], "RUNNING")
         self.assertIsNone(run["roles"]["deep_reasoner"]["evidence"]["execution"]["elapsed_seconds"])
 
+    def native_rows(self):
+        return [
+            {'type': 'user', 'timestamp': '2026-10-28T00:00:00Z',
+             'message': {'content': partner_tryout.task_prompt('deep_reasoner')}},
+            {'type': 'api-request', 'model': 'requested-opus',
+             'message': {'model': 'requested-opus'}},
+            {'type': 'assistant', 'timestamp': '2026-10-28T00:00:02Z',
+             'message': {'model': 'actual-model', 'content': [{'type': 'tool_use',
+                 'name': 'SubagentHandback', 'id': 'handback-1',
+                 'input': {'message': 'A. It travels with the repo.'}}]}},
+            {'type': 'user', 'timestamp': '2026-10-28T00:00:03Z',
+             'message': {'content': [{'type': 'tool_result', 'tool_use_id': 'handback-1',
+                 'content': [{'type': 'text', 'text': '{"success":true}'}]}]}},
+        ]
+
+    def test_native_transcript_extracts_only_observed_models_and_confirmed_completion(self):
+        path, _ = self.start()
+        native = self.repo / 'native.jsonl'
+        native.write_text('\n'.join(json.dumps(row) for row in self.native_rows()))
+        with patch.object(partner_tryout, 'delegate', return_value='state: RUNNING\n'):
+            run = partner_tryout.collect(path, 0, {}, {'deep_reasoner': native})
+        row = run['roles']['deep_reasoner']
+        self.assertTrue(row['process_succeeded'])
+        self.assertFalse(row['passed'])  # Reasoning still needs the driver's judgment.
+        self.assertEqual(row['evidence']['agent_message'], 'A. It travels with the repo.')
+        self.assertEqual(row['evidence']['observed_models'], ['actual-model'])
+        self.assertEqual(row['evidence']['execution']['elapsed_seconds'], 3)
+
+    def test_native_transcript_cannot_promote_partial_failed_or_unrelated_evidence(self):
+        native = self.repo / 'native.jsonl'
+        for variant in ('partial', 'failed', 'wrong_id', 'is_error'):
+            with self.subTest(variant=variant):
+                rows = self.native_rows()
+                result = rows[-1]['message']['content'][0]
+                if variant == 'partial':
+                    rows.pop()
+                elif variant == 'failed':
+                    result['content'][0]['text'] = '{"success":false}'
+                elif variant == 'wrong_id':
+                    result['tool_use_id'] = 'unrelated'
+                else:
+                    result['is_error'] = True
+                native.write_text('\n'.join(json.dumps(row) for row in rows))
+                evidence = partner_tryout.native_transcript(native, 'deep_reasoner')
+                self.assertFalse(evidence['completed'])
+                self.assertIsNone(evidence['execution']['returncode'])
+        rows = self.native_rows()
+        rows[0]['message']['content'] = 'An unrelated task'
+        native.write_text('\n'.join(json.dumps(row) for row in rows))
+        with self.assertRaisesRegex(ValueError, 'exact task'):
+            partner_tryout.native_transcript(native, 'deep_reasoner')
+
+    def test_native_transcript_missing_timestamps_stays_unknown(self):
+        native = self.repo / 'native.jsonl'
+        rows = self.native_rows()
+        rows[-1].pop('timestamp')
+        native.write_text('\n'.join(json.dumps(row) for row in rows))
+        evidence = partner_tryout.native_transcript(native, 'deep_reasoner')
+        self.assertTrue(evidence['completed'])
+        self.assertIsNone(evidence['execution']['elapsed_seconds'])
+
+    def test_new_handback_cannot_reuse_an_older_answer_success_or_timing(self):
+        native = self.repo / 'native.jsonl'
+        rows = self.native_rows()
+        rows.append({'type': 'assistant', 'message': {'model': 'actual-model',
+            'content': [{'type': 'tool_use', 'name': 'SubagentHandback', 'id': 'handback-2',
+                'input': {'message': 'Unconfirmed new answer'}}]}})
+        native.write_text('\n'.join(json.dumps(row) for row in rows))
+        evidence = partner_tryout.native_transcript(native, 'deep_reasoner')
+        self.assertEqual(evidence['agent_message'], 'Unconfirmed new answer')
+        self.assertFalse(evidence['completed'])
+        self.assertEqual(evidence['execution'], {'returncode': None, 'elapsed_seconds': None})
+
+    def test_native_transcript_cannot_replace_codex_or_conflict_with_another_source(self):
+        path, _ = self.start()
+        for results, transcripts in (({}, {'fast_worker': 'unused'}),
+                                     ({'deep_reasoner': 'one'}, {'deep_reasoner': 'two'})):
+            with self.subTest(results=results, transcripts=transcripts):
+                with self.assertRaises(ValueError):
+                    partner_tryout.collect(path, 0, results, transcripts)
+
     def test_missing_configuration_fails_before_any_dispatch(self):
         with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.repo / "config")}), \
                 patch.object(partner_tryout, "delegate") as dispatch:

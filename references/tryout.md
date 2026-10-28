@@ -46,6 +46,8 @@ subagent for `backend=claude`,
 
 Use the helper instead of inventing shell commands or JSON validators. Keep one
 driver writing a run manifest; do not run collect/finalize concurrently on it.
+Start with step 1; the helper resolves configuration and paths. Do not list
+scripts, read helper source or rediscover CLI arguments during a normal run.
 
 1. `python3 "$PARTNER_DIR/scripts/partner-tryout.py" start --host <driver> --repo "$REPO"`
    (optionally `--role <identity>`). This validates configuration before any
@@ -55,13 +57,22 @@ driver writing a run manifest; do not run collect/finalize concurrently on it.
    the host's Claude subagent mechanism immediately, while Codex jobs run.
    Never replace a Claude packet with a Codex subagent. If the current host
    cannot launch the configured Claude channel, report the unsupported route.
-2. After a native Agent returns, save its evidence in the run directory as JSON:
+2. After a native Agent returns, pass its actual transcript path directly to
+   collect using `--agent-transcript deep_reasoner=<native.jsonl>`. The helper
+   checks the exact task, extracts assistant response models (not request model
+   names), and requires a successful SubagentHandback result for completion.
+   It measures elapsed time from the task message to confirmed handback.
+   Do not grep model names or manually rewrite an available transcript.
+   If that host has no transcript/confirmed handback, save explicit Agent
+   evidence in the run directory as JSON instead:
    `{"completed":true,"source":"actual Agent result ID or transcript path","agent_message":"verbatim final answer","observed_models":[],"execution":{"returncode":0,"elapsed_seconds":null}}`.
    `completed` means the Agent call ended; use returncode 0 only for a successful
    call, nonzero for a failure, and null when unknown. Copy measured elapsed time
    and observed model names only from actual tool/transcript evidence. Keep
    unavailable values null/empty; requested effort is not observed enforcement.
-3. `python3 "$PARTNER_DIR/scripts/partner-tryout.py" collect <run.json> --wait-seconds 60 --agent-result deep_reasoner=<native.json>`.
+3. `python3 "$PARTNER_DIR/scripts/partner-tryout.py" collect <run.json> --wait-seconds 60 --agent-transcript deep_reasoner=<native.jsonl>`.
+   Use `--agent-result deep_reasoner=<native.json>` only for the explicit evidence
+   fallback above. Never supply both forms for the same role.
    Repeat collect on the same run if jobs remain running. Omit agent-result when
    absent; multiple Claude roles accept repeated arguments. This command never
    resubmits, cancels, or relaxes acceptance. Failed/partial submissions retain
@@ -73,6 +84,9 @@ driver writing a run manifest; do not run collect/finalize concurrently on it.
    from raw output. Routing is established only from observed/configured evidence
    or an explicitly declared mapping; do not infer it from a successful answer.
    Run `python3 "$PARTNER_DIR/scripts/partner-tryout.py" finalize <run.json> --judgments <judgments.json>`.
+   The flags below are the complete optional receipt inputs; no help/source
+   discovery is needed. Write the judgments and finalize in one tool call when
+   the host supports it, then give the concise fixed report from the returned data.
    It saves the fixed receipt and returns per-role results, old verification
    metadata, current verification, actual execution evidence and total run timing.
    Pass known `--claude-session`, `--new-claude-p` (from session-snapshot diff) and
