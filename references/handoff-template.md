@@ -63,54 +63,54 @@ receipt_schema_version: 2
 ```
 ```
 
-## Claude → Codex Delegation Packet (Direction B)
+## Delegation Packet (both directions)
 
-Use this packet when Claude Code delegates a task to Codex via
-`delegate-codex.sh submit`. It follows `references/fable5-principles.md`:
-why-forward opening, one-sentence task, verifiable acceptance, only genuine
-constraints, fixed output discipline.
+This is the shared implementation/review packet referenced by `SKILL.md`.
+Keep facts necessary for a fresh agent; omit empty history, not constraints.
+Tool-free planning uses the separate bounded evidence contract in
+`references/bounded-planning.md` because that agent cannot read these paths.
 
 ```markdown
 # Partner Delegation
 
-## Context
-I'm working on [the larger task] for [who it's for]. They need
-[what the output enables]. With that in mind:
-
 ## Task
-[One clear sentence. What to produce or change.]
+[One job and explicit intent: investigate, review, implement, or deliver.]
+
+## Context
+[Why this work matters and what it enables.]
+
+## Relevant files and current state
+[Live paths, starting revision/dirty baseline, known findings and decisions.]
+
+## What was tried
+[Failed approaches and why; omit when none.]
 
 ## Acceptance
-- [Verifiable condition, e.g. `npm test` passes, all call sites migrated]
-- [Check command Codex must run before finishing]
+[Observable behavior and relevant check commands; preserve the original request.]
 
 ## Constraints
-- Only touch: [paths in scope]. Do not touch: [paths out of scope].
-- Do not commit, push, deploy, publish, or touch secrets or `.env` files.
-- Pause only for a destructive or irreversible action, a real scope
-  change, or something only the user can provide. Otherwise continue
-  end-to-end and report when done.
+- Only touch: [paths]. Preserve: [business/compatibility constraints].
+- [Existing user authorization and its limits.]
+- Pause only for missing user-only information, a real scope change, or an
+  action outside authorization; otherwise finish and report evidence.
 
 ## Output
-- DO NOT send optional commentary. Answer only what was asked — no
-  preamble, no unsolicited suggestions, no closing remarks.
-- End with at most 3 lines of lessons learned (for rollout memory).
+[Changed files or investigation findings, checks, unresolved items; concise.]
 ```
 
-Delegation packet rules:
-
-- Acceptance criteria are what the Phase 4 full review checks against;
-  write them as commands or observable behavior, never vibes.
-- Keep the constraints section short — genuine blockers only. Trust the
-  model with approach decisions inside the scope boundary.
-- For fix rounds (`delegate-codex.sh resume`), send only: the review
-  findings (prioritized), the acceptance criteria that failed, and
-  "Continue end-to-end from here." Do not resend the whole packet.
+- Analysis/review packets end with the exact no-edits constant from `SKILL.md`
+  and use a read-only execution boundary. Do not request fixes inside a review.
+- For repair rounds, send only prioritized findings, failed acceptance criteria
+  and "Continue end-to-end from here." Reuse the session when healthy.
+- Record task ownership separately from the whole-worktree change inventory.
+  Handoff evidence includes staged, unstaged and untracked files; it does not
+  prove all those changes were created by this job.
 
 ## Good Handoff Rules
 
 - Include `git diff --stat`; include full diffs only for small files.
-- Include check output summaries, not entire noisy logs.
+- Include check command, exit status and bounded output, not entire noisy logs.
+- Keep one coordinator writing goal state; use the locked goal-sync helper.
 - Name the exact phase: `plan`, `polish`, `review`, or `fix`.
 - Ask for prioritized findings. Do not ask for a broad rewrite unless the user requested one.
 - If Claude Code returns style-only ideas after the app already works, Codex decides whether they are worth applying.

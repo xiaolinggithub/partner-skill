@@ -1,36 +1,36 @@
 # Partner Scenario Profiles
 
-The default flow in `SKILL.md` assumes a small-to-medium, UI-leaning task in a
-git repository. These profiles say what changes when the task does not fit
-that picture. Everything not mentioned here follows the default flow, and the
-core split never changes: Claude Code plans/polishes/reviews, Codex
-implements/verifies, one session is reused, and the run ends with a receipt.
+Apply the workflow depth from `SKILL.md` first. These profiles refine task
+intent and acceptance; they do not force another agent or a separate polish pass.
 
 ## Review-Only
 
-The user only wants the current diff reviewed and fixed.
-
-- Skip the planning phase; do not send `/goal`.
-- Start (or reuse) one Claude Code session directly for `/codex:review`.
-- Codex fixes blocking findings and reruns checks; style-only findings are Codex's call.
-- Receipt: `phase: review`; `claude_session_reused` reflects whether an existing session was picked up.
+- Review the complete relevant diff against the original requirements.
+- Use a read-only reviewer and return findings. Apply fixes only when the user
+  asked for fixes as well; do not reinterpret "review" as authorization to edit.
+- Skip planning and `/goal` unless an unresolved decision requires them.
+- Receipt: `phase: review`; distinguish findings from fixes actually applied.
 
 ## Debugging / Incident
 
-The goal is a diagnosis, not a feature.
-
-- Invert the loop: Claude Code proposes ranked hypotheses; Codex reproduces, instruments, and confirms or kills each one in the repo.
-- Send Claude reproduction output and failing-check evidence, not file dumps.
-- The polish phase becomes "harden the fix": regression test, error message quality, log clarity.
-- Stop condition is a reproduced-then-fixed failing case, not "code looks right".
+- For investigation, gather bounded evidence and test ranked hypotheses using
+  read-only sources. Return the supported conclusion, alternatives and unknowns.
+- A production investigation never authorizes request replay, resends, data edits
+  or deployment. Keep HIS success, local commit, downstream notification and final
+  business outcome distinct; timestamps alone do not establish causality.
+- For an authorized fix, reproduce the failure where possible, implement it and
+  run the relevant regression check. Investigation can finish with a supported
+  diagnosis even when the user has not authorized a repair.
 
 ## Non-UI Task (Backend, Scripts, Data)
 
-There is no visual surface, but the polish phase still exists — redefined:
-
-- Polish targets: API shape and naming, error messages, edge-case behavior, log/output quality, docs and help text.
-- Ask Claude for prioritized findings on those axes instead of visual critique.
-- Never skip polish just because there is no UI; skip it only when the user asks for the minimal loop.
+- Include API compatibility, error behavior and relevant edge cases in the same
+  acceptance review. Do not create a separate polish phase merely to fill a slot.
+- Before a Java job, resolve the project's JDK and build command, network needs
+  and dependency-cache write permissions. A blocked build is an environment issue,
+  not evidence that implementation passed or failed.
+- Report local checks, external/HIS integration, SQL execution/plan, deployment
+  and observed production effects separately. An unrun layer stays unverified.
 
 ## Non-Git Directory
 
@@ -46,7 +46,7 @@ Repo-wide diffs drown the handoff in unrelated noise.
 
 - Scope every git command to the package: `git status --short -- <path>`, `git diff --stat -- <path>`.
 - Name the package path in the handoff Task line; Claude should not reason about sibling packages.
-- Run the package-local check (workspace script) rather than the repo-wide suite when iterating; run the wide suite once before the final receipt.
+- Run the package-local check (workspace script) rather than the repo-wide suite when iterating; run a wider suite when affected dependencies or the repo's checks require it.
 
 ## Large Or Multi-Day Task
 

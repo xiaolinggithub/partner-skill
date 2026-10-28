@@ -18,10 +18,21 @@ python3 "$PARTNER_DIR/scripts/run-claude-plan.py" \
 
 It resolves backend, model, and effort only from Partner config. Missing,
 unverified, or non-Claude roles fail before the CLI starts. It never chooses a
-replacement model. `--allow-unverified` is an explicit diagnostic override,
+replacement model. For an intentional route/alias mapping, explicitly provide
+`--expected-model` and record the requested, expected and observed model; an
+unexplained mismatch still fails. `--allow-unverified` is an explicit diagnostic override,
 not a fallback. Changing backend, model, or effort invalidates inherited
 verification unless the higher-priority layer explicitly verifies that exact
 identity.
+
+## Child Routing
+
+Child Claude processes default to `PARTNER_CLAUDE_ENV=clean`: remove inherited
+provider/session overrides and use normal CLI configuration. Set
+`PARTNER_CLAUDE_ENV=inherit` explicitly when the current route (for example CC
+Switch) must be inherited. Keep credentials out of packets, metadata and reports.
+An expected-model declaration documents mapping; it does not prove provider
+identity or billing. Record unavailable observations as unknown.
 
 ## Who Builds The Packet
 
@@ -95,8 +106,8 @@ level-two sections in order:
 A conversational preamble, empty result, missing section, reordered section, or
 empty section is a `protocol_error`. The runner preserves the visible text in
 the checkpoint and writes recovery instructions, but does not create a plan
-file. A nominal success must also report the requested session id and exact
-configured model; observed values are persisted in metadata and mismatches fail
+file. A nominal success must also report the requested session id and expected
+returned model (the configured model unless explicitly mapped); observed values are persisted in metadata and mismatches fail
 closed.
 
 ## Artifacts
@@ -122,7 +133,8 @@ attempted tool use, the runner exits non-zero and writes `recovery.md`. Resume
 the recorded session first. A different configured role may be used only after
 explicit user approval; Partner never changes it automatically.
 
-The existing one-line setup smoke still proves only that an identity can start.
+Setup smoke proves only the stated check: Codex dry-run validates configuration;
+Claude smoke obtains a live response. Neither establishes engineering quality.
 For release claims, run at least three repository-scale near-limit attempts,
 including a valid fresh plan and a valid same-session recovery. Inspect every
 failure rather than requiring upstream availability to look perfect, and bind

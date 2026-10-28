@@ -48,9 +48,9 @@ output be worse, and would the review gate catch it?); "the split saves
 money" (does boundary integration/review/rework cost eat the savings?);
 "this task is on the right channel" (name it — Partner background job /
 one-shot Codex subagent / cheaper-Claude subagent — and prove no
-quality-critical step went cheap to save money and no mechanical step burned
-the expensive Claude seat; only the Codex channels move the meter to the
-subscription); and "the delegation prompt is ready" (attack the packet:
+quality-critical step used an inadequate model to save money; keep small
+mechanical work inline when handoff costs more. CLI names do not determine
+billing or independent providers, especially with CC Switch routes); and "the delegation prompt is ready" (attack the packet:
 vague goal, bundled tasks, over-constrained toolchain, review asked to also
 fix — a bad packet fails before the model does). Close with `分工
 (Assignment)` in the output: restate the corrected task→owner→role mapping

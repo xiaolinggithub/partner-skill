@@ -11,7 +11,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/LearnPrompt/partner-skill?style=flat-square&color=f5c542)](https://github.com/LearnPrompt/partner-skill/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**把 Claude Code 留给规划、审美和审查，把 Codex 留给实现、跑检查和收尾。v2.0.1 再把仓库级 Fable 规划变成有边界、可恢复、可审计的流程。**
+**按任务风险组织 Claude Code 与 Codex 协作：小任务直接做，清晰任务一次委派、一次验收，复杂任务再规划与独立审查。**
 
 [30 秒装上](#30-秒装上) · [Showcase](#showcase) · [一句话用起来](#一句话用起来) · [分宿主用法](#分宿主用法) · [成本压力模型](#成本压力模型) · [它解决什么](#它解决什么) · [安全边界](#安全边界) · [验证](#验证)
 
@@ -120,7 +120,7 @@ bash install.sh --target codex
 搭子
 ```
 
-Codex 读到这份 SKILL.md 就自认宿主是 codex，走 `references/codex-driven.md`：自己编排实现、跑检查、修细节；Claude Code 只负责规划、UI polish 和最终 `/codex:review`，同一个 Claude 会话复用，不重复冷启动。
+Codex 加载这份 SKILL.md 时走 `references/codex-driven.md`：自己负责实施与验收，必要时请配置的角色提供规划或审查。普通任务合并 polish 与 review；高风险任务允许新会话独立审查。
 
 **装在 Claude Code 里（Direction B，Claude 主驾）**
 
@@ -132,29 +132,24 @@ bash install.sh --target claude
 搭子，分工给 codex 后台跑，做完你全量验收。
 ```
 
-Claude Code 读到这份 SKILL.md 就自认宿主是 claude_code，走 `references/claude-driven.md`：规划、拆分、先过点子王对抗式审查，再把机械/额度压力型任务丢给 `delegate-codex.sh` 后台作业，用 loop 盯进度，最后全量 review 才接受。
+Claude Code 加载这份 SKILL.md 时走 `references/claude-driven.md`：选择值得委派的任务，用 `delegate-codex.sh` 后台执行，再对照原始需求全量验收。复杂或高风险分工才加入点子王审查；小任务可以直接完成。
 
 宿主身份看的是"谁加载了这份 SKILL.md"，不是提示词里提到谁——在 Claude Code 里说"让 codex 做"不会让它把自己当成 Codex，反过来也一样。两边角色的模型/推理强度共用一份 `.partner/config.toml`，向导（见上）里选一次就够了。
 
 ## 成本压力模型
 
-Partner 的省钱逻辑不是“少用 Claude”，而是**别让 Claude 反复冷启动**。最贵的浪费通常不是那一次 polish，而是 Codex 改完之后又开一个全新的 Claude review，让它重新读项目、重新理解目标、重新建立上下文。
+成本由实际路由、认证与模型决定。`backend=claude/codex` 只表示 CLI；Claude Code 可以通过 CC Switch 使用 GPT 或其他模型，两边也可能共用同一订阅额度。不同客户端不保证不同模型、独立审查或更低消耗。
 
-当前 README 用的是 showcase workload model，不是 API billing telemetry。没有可靠数据支撑时，我们不声称能省多少 token。这张表由 `scripts/showcase-cost-ledger.py` 生成，源数据在 `examples/showcase-cost-ledger.json`。
+优先减少不必要的委派、重复扫描和重复验收。健康会话适合续修；上下文过重或高风险独立审查可以使用新的有界会话。判断优化要比较同一验收条件下的总耗时、输入/缓存/输出用量、首次通过率和返工次数，不能只看执行阶段或用 tokens 推算订阅百分比。
 
-| 没有 Partner | 有 Partner |
+历史 showcase workload model 不是 API billing telemetry。可复算示例来自 `scripts/showcase-cost-ledger.py` 与 `examples/showcase-cost-ledger.json`；它们描述示例假设，不是当前路由的节省承诺。详见 [成本证据边界](docs/showcase-cost-model.md)。
+
+| 任务 | 默认协作深度 |
 |---|---|
-| Claude 规划一次，Codex 改完后又新开 Claude review | 同一个 Claude Code 会话保留计划上下文 |
-| 每次 review 都重新解释 repo、目标和 diff | Codex 只回传 bounded handoff |
-| “省 token”说不清楚 | receipt 明确写 `new_claude_p_sessions: 0` |
-
-三种模式可以这样看：
-
-| 模式 | Codex 承担 | Claude Code 承担 | Claude 压力 | 适合场景 |
-|---|---:|---:|---:|---|
-| 纯 Codex | 100% 实现与检查 | 0% | 0.0x，但少了 Claude 的 UI / review 视角 | 低风险、无 UI 口味要求 |
-| 搭子 Partner | 约 70% 实现、检查、修复 | 约 30% 计划、polish、review | 0.3x，并尽量避免重复 cold start | UI-heavy、功能多、需要省 Claude API 成本 |
-| 纯 Claude Code | 0% | 100% 全流程 | 1.0x，机械改动也由 Claude 承担 | 很短任务，或用户明确要 Claude 全包 |
+| 小而明确的修改 | 主控直接完成与验证 |
+| 清晰的模块任务 | 一次委派，一次完整验收 |
+| 跨模块或不确定任务 | 有界规划，必要分工，集成验收 |
+| 高风险变更或争议决策 | 独立审查，必要时盲解仲裁 |
 
 标准收尾小票：
 
@@ -174,40 +169,27 @@ monitoring_level: full
 
 ## 它解决什么
 
-你可能已经在 Codex 和 Claude Code 之间来回切了。真正麻烦的不是“它们能不能协作”，而是协作经常散掉：
+Partner 保留可恢复的任务记录和完整验收，减少固定流程对模型的依赖：
 
-- Claude Code 适合计划、UI 口味和 review，但让它包办所有机械改动很贵。
-- Codex 适合长上下文实现、跑检查、修细节，但 UI polish 和最终审查需要另一个视角。
-- 最浪费的是 Codex 实现完之后又新开 Claude，会话上下文全丢，Claude 重新读项目。
-- 用户只听到“我用了 Claude”，但看不到到底有没有省钱。
-
-Partner 把这件事变成固定协议：
-
-```text
-Claude Code same session:
-  plan -> polish -> /codex:review
-
-Codex:
-  implement -> verify -> monitor -> fix -> receipt
-```
-
-v1.4 起是双向搭子：反过来 Claude Code 主驾时，把机械、额度压力型任务分工给 Codex 后台跑，Claude 用 loop 盯进度、逐个全量验收，分工方案先过点子王（idea-king）的对抗式审查：
+- 角色按能力选，CLI、请求模型、观察模型和计费来源分开记录。
+- 一个工作目录只保留一个写入者；独立写任务用 worktree，只读调查可以并行。
+- 交接包含已暂存、未暂存和未跟踪文件，并与任务开始前的基线比较。
+- `DONE` 只表示进程退出；结果必须对照需求与检查证据验收。
+- 静默日志先检查命令、权限和期限，不直接取消长构建或重跑生产请求。
+- 调查、审查、修改、交付保持原始意图；只读调查不自动变成修复。
 
 ```text
-Claude Code (driver):
-  plan -> split (idea-king gate) -> delegate -> monitor loop -> full review -> receipt
-
-Codex (background jobs):
-  implement -> report -> bounded fix rounds on the same session
+Driver: scope -> delegate when useful -> accept against requirements -> report
+Worker: execute -> evidence -> bounded same-session repair if needed
 ```
 
-下沉执行有三条通道，按「电表落在订阅上」优先排序：搭子后台作业（`delegate-codex.sh`，走 Codex 订阅，可 loop 监控 + resume 返工）> 一次性 Codex subagent（卡住时补刀）> 更便宜的 Claude subagent（仍走 Claude API 计量，不省额度）。质量关键步即使贵也留 Claude。
+点子王用于有争议、复杂或高风险的计划；它会检查委派边界是否值得，而不是要求每次任务都额外开一轮讨论。
 
 <div align="center">
 <img src="assets/showcase-idea-king.gif" alt="点子王对抗式审查:verdict 先行、攻击点带 evidence/inference 标签、证伪实验" width="720" />
 </div>
 
-分工方案先过点子王：结论先行（ship / needs-attention / no-go），每条攻击标注 evidence 或 inference，并附上最便宜的证伪实验。
+需要挑战分工方案时使用点子王：结论先行（ship / needs-attention / no-go），每条攻击标注 evidence 或 inference，并附上最便宜的证伪实验。
 
 宿主自识别，不靠猜：这份 SKILL.md 被谁加载（Claude Code 还是 Codex）就是谁的身份，提示词里提另一个 Agent 不会切换身份。角色的模型/推理强度只有一份事实源——`.partner/config.toml`（项目或全局），不会散落进 prompt 或文档里到处抄。
 
@@ -232,8 +214,8 @@ Claude 里跑 Codex Review 验收当前 diff，发现问题你来修。
 
 ## 它会交付什么
 
-- 清晰分工：Claude Code 负责计划、polish、review；Codex 负责实现、监控、验证、修复。
-- 省预算默认策略：小中型任务尽量复用同一个 Claude Code 会话。
+- 按风险分工：主控负责验收，必要时调用配置角色，不强制每个角色参与。
+- 控制协作开销：小任务直接完成，健康会话续修，高风险审查允许独立会话。
 - Bounded handoff：只把 Claude 需要的计划、diff stat、检查结果和风险交回去。
 - 监控清单：PTY、`claude agents --json`、transcript、task files、git diff/test 五层证据，配 `scripts/check-claude-cli.sh` 能力探测和降级策略。
 - Session Receipt：把是否复用会话、是否新开 `claude -p`、检查、异常和监控等级写清楚，可用 `scripts/validate-receipt.py` 机器校验。
@@ -241,7 +223,7 @@ Claude 里跑 Codex Review 验收当前 diff，发现问题你来修。
 - Bounded Claude planning：Codex 先整理 24,000 字符内的证据包，`scripts/run-claude-plan.py` 再按配置中的 Claude 模型/effort 做一次无工具、无子 Agent、有 wall/idle/API 预算的规划；成功与失败都留下可核验工件，绝不静默换模。
 - Darwin-style 验证门：一次只改一个协作维度，过检查才保留。
 - 首次配置向导（`搭子，配置`）：均衡/质量/成本预设可继续逐角色调整，`.partner/config.toml` 是双宿主共享的单一事实源；小白流程使用安全默认值，预览 diff 再落盘，绝不覆盖已有 agent 文件；模型和 effort 从两个 CLI 的真实能力列表读取，安装后自动启动无工具的新 Claude session 和 Codex dry-run 做验证。
-- Partner Session Receipt v2：新增 `host`/`scope`/`config_source`/`roles_used` 字段，能证明这次跑的到底是哪个模型、哪个 effort，而不只是"用了 Claude"。
+- Partner Session Receipt v2：保存 `host`/`scope`/`config_source`/`roles_used`；配置值与运行观察分开记录，缺少证据就写 unknown。
 - 可选的完整协议（`references/goal-to-pr.md`）：Plan→Goal→PR→Verification，一路跑到 merge-ready + preview verified 为止；merge、上生产、打 tag、force-push、删除、破坏性迁移、对外发布，每一个都要单独一句祈使句授权。
 
 ## 文件结构
@@ -286,6 +268,7 @@ scripts/session-snapshot.sh      transcript 快照对比，让新开会话数成
 scripts/validate-receipt.py      校验 Partner Session Receipt 的字段与取值
 scripts/run-test-prompts.py      行为回归 prompt 的静态检查与实验性 live 模式
 scripts/run-claude-plan.py       按配置运行 bounded Claude planner，保存 sanitized events/checkpoint/cost
+scripts/run-codex-job.py         运行委派命令，记录耗时并限制超时和并发写入
 scripts/delegate-codex.sh        Codex 后台任务原语：submit / status / result / resume / cancel
 scripts/partner-config.py        配置引擎：TOML 子集解析、确定性写回、锁与原子写（schema v2）
 scripts/partner_runtime.py       Claude 子进程共享环境边界，避免宿主变量污染一方 OAuth

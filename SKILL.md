@@ -2,7 +2,7 @@
 name: partner-skill
 version: 2.0.1
 description: |
-  搭子.skill / Partner — two-direction cost-split workflow between Claude Code and Codex. Direction A (Codex-driven): Codex orchestrates and implements; Claude Code plans (/goal), polishes UI/interaction, and runs final /codex:review in one reused session. Direction B (Claude-driven): Claude plans and splits the work, runs the idea-king adversarial gate, delegates to Codex background jobs, monitors, and full-reviews before accepting. Use on "搭子" / "双向搭子" / "搭子，恢复" (resume from .partner/), "搭子，配置" (first-run setup wizard), "搭子，试跑" (identity tryout report), 分工给 codex / 让 codex 做 / codex 后台跑 / Claude 计划 Codex 实现 / 让 Claude skip 做完, or any request to split coding work between Claude Code and Codex to save quota. Not for ordinary code review without Claude Code; do not trigger on the bare English word "partner" in unrelated contexts.
+  搭子.skill / Partner — two-direction engineering workflow between Claude Code and Codex. The active host chooses workflow depth by task risk, delegates only useful units, and verifies results against the user's intent. Complex plans may use idea-king; contentious decisions may use blind arbitration. Use on "搭子" / "双向搭子" / "搭子，恢复" (resume from .partner/), "搭子，配置" (first-run setup wizard), "搭子，试跑" (identity tryout report), 分工给 codex / 让 codex 做 / codex 后台跑 / Claude 计划 Codex 实现 / 让 Claude skip 做完, or any request to split coding work between Claude Code and Codex to save quota. Not for ordinary code review without Claude Code; do not trigger on the bare English word "partner" in unrelated contexts.
 ---
 
 # 搭子.skill (Partner)
@@ -11,11 +11,30 @@ description: |
 
 ## Overview
 
-Use this skill to run a two-agent coding workflow: Claude Code is the high-value planning, polish, and review agent; Codex is the outer orchestrator and main implementer. Keep Claude Code usage focused because it may be billed through API.
+The active host owns the result. Use the configured roles for planning,
+implementation and review when their contribution outweighs handoff, context,
+review and rework overhead. Neither client name determines model quality,
+provider, authentication, or billing. CC Switch can intentionally route Claude
+Code to a GPT or other model; both clients can share the same quota pool.
 
-Prefer one long-lived Claude Code session for small and medium tasks: ask Claude for the plan, let Codex implement, then return the diff summary and key files to the same Claude session for UI/interaction polish and final `/codex:review`. This avoids paying Claude to rebuild the same project context and gives Claude enough continuity to improve the work.
+## Workflow Depth
 
-Partner is not a delegation excuse. The user remains the owner, Codex remains accountable for repository evidence, and Claude Code is treated as a high-value collaborator whose output must be verified.
+Choose from repo evidence and the user's request without asking them to select
+an operating mode:
+
+| Task | Default flow |
+|---|---|
+| Small, reversible, clear change | Driver implements and runs the relevant check; no mandatory delegation, goal file or extra review session. |
+| Bounded module task | One delegation, then one full acceptance review; combine polish and review. |
+| Cross-module or uncertain work | Compact plan, justified split, integrated acceptance; use idea-king when the split or premise needs challenge. |
+| High-risk change or contentious decision | Independent review; use blind arbitration for disputed decisions, not every task. |
+
+Keep implementation and investigation distinct. A read-only request never
+becomes a fix, production replay, resend, or deployment. Full acceptance means
+checking the original requirements and evidence, not running every phase.
+Use helpers for routing, waiting, timestamps and reports; use models for
+judgment. Only one writer owns a working directory; isolate independent write
+jobs in worktrees. Read-only jobs can run concurrently.
 
 ## Host Detection
 
@@ -23,7 +42,7 @@ Partner is one Core (this file) plus one host adapter. Decide the host once at t
 
 - **The host is the runtime that actually loaded this SKILL.md.** Self-identification wins: a prompt that merely mentions the other agent ("让 codex 做", "ask Claude") never switches your identity.
 - The `host=codex|claude|generic` marker in `.install-meta` (written by install.sh) is a tiebreaker only, for copies whose load path is ambiguous. It never overrides self-identification.
-- A generic install (`~/.agents`) runs Core-only: state up front that adapter primitives (delegate-codex.sh background jobs, Claude session monitoring) are unavailable instead of pretending they work.
+- An unknown runtime runs Core-only until capabilities are established. A shared `~/.agents` directory or symlink does not override a known Claude Code/Codex runtime.
 - Probing the peer CLI (`codex --version`, `check-claude-cli.sh`) only tells you what the other side can do; it never decides which adapter you load.
 
 Then load the matching adapter:
@@ -51,7 +70,7 @@ freely mixed across vendors. Their values live only in
 (global) — schema in `docs/config-schema.md`; never duplicate them into
 prompts or docs. On "搭子，试跑", run the identity tryout in
 `references/tryout.md`: each identity executes one micro-task and the
-report proves they are live on the configured models.
+report distinguishes requested and observed models, actual elapsed time, and output validity. A dry-run configuration check is not a live verification.
 
 ## Tool Location
 
@@ -59,38 +78,26 @@ The helper scripts referenced below live in this skill's install directory (the 
 
 ## LOCAL NOTE — 本机安装拓扑与来源（非上游内容）
 
-**来源已改为自有 fork，且 git 仓库就在安装目录里。** `~/.agents/.skill-lock.json`
-里 partner-skill 的 `source` 指向 `xiaolinggithub/partner-skill`（2026-08-18 起），
-不再是 `LearnPrompt/partner-skill`，所以 `npx skills update` 从 fork 拉，本地改动
-不会被覆盖。安装实体 `~/.agents/skills/partner-skill` 本身就是那个 fork 的工作树
-（`origin`=fork，`upstream`=LearnPrompt），没有第二份副本，改完直接在这里
-`git commit && git push`。同步上游：`git fetch upstream && git merge upstream/main`，
-解冲突后 push。
-
-**全机只有一份实体，其余全是软链**：
-
-```
-~/.agents/skills/partner-skill            ← 唯一实体，同时是 fork 的 git 工作树
-~/.claude/skills/partner-skill            → ../../.agents/skills/partner-skill
-~/.codex/skills/partner-skill             → /Users/easy/.agents/skills/partner-skill
-~/.agents/skills/partner-skill/idea-king  ← idea-king 的唯一实体（在仓库内）
-~/.agents/skills/idea-king                → partner-skill/idea-king
-~/.claude/skills/idea-king                → ../../.agents/skills/idea-king（二级链）
-~/.codex/prompts/idea-king.md             → …/partner-skill/idea-king/codex-prompt.md
-```
-
-- **不要跑 `install.sh --target all`（也不要 `--target agents`）。** 它假设各处彼此独立：先把实体 `mv` 成 backup，再 `mkdir` 空目录，然后从 `$ROOT` 拷贝——而 `$ROOT` 此刻已经是指向那个空目录的悬空软链，于是把源目录清空，`set -e` 在随后的 `cp idea-king/codex-prompt.md` 处中止，后续步骤全不执行。2026-08-13 实际发生过一次，靠 `partner-skill.backup.<ts>` 完整还原。现在实体里还带着 `.git`，跑它的代价更高。
-- 装子技能一律手工建软链，不走脚本。
-- **`idea-king` 是可直接调用的独立技能**，不需要再去读 `idea-king/SKILL.md` 内联执行。Direction B 的分工方案在委派前必须过它这一关（四项攻击都要跑，尤其是"攻击委派包本身"那项），并输出含 `分工 (Assignment)` 的固定格式。
-- 改 idea-king 只改仓库内那一份（`partner-skill/idea-king/`）；`SKILL.md` 与
-  `codex-prompt.md` 是两个不同文件（后者是给 Codex 的精简版），规则改动要两个都过一遍。
+This installation may be shared through symlinks. Inspect `ls -ld`, `readlink`,
+and `git remote -v` before updating it; an installation lock's source URL does
+not prove that `.git` exists or that local edits are safe from an updater.
+Do not run `install.sh --target all` from a directory that is also an install
+target: moving the target away can invalidate the source. Use an isolated
+checkout for development, retain a backup, and preserve existing symlinks.
+`idea-king/SKILL.md` and `idea-king/codex-prompt.md` are separate instruction
+files; update both when changing their shared rules.
 
 ## Routing Rules
 
-- Route to Claude Code: architecture planning, implementation strategy, UI/interaction critique, final Codex Review, difficult product tradeoffs.
-- Route to Codex: scaffolding, implementation, long-context code edits, tests, build fixes, repository inspection, monitoring, summaries.
-- Route back to the same Claude Code session when UI quality matters or the first implementation passes technically but still needs product polish.
-- Keep Kimi Work/Kimi Code Goal separate from Claude Code `/goal`; prior "Goal mode" context may refer to Kimi, not Claude.
+- Choose capability (`deep_reasoner`, `fast_worker`, `arbiter`) before execution
+  channel. Keep integration and final acceptance with the driver.
+- Resolve backend/model/effort from config. Record requested and observed models
+  separately; label unobserved values and billing sources `unknown`.
+- Intentional route mappings are allowed; do not silently substitute a model
+  to make a task pass. Different clients alone do not prove independent models.
+- Reuse a healthy session for repair rounds; use a bounded fresh session when
+  context has become stale or independent high-risk review is needed.
+- Keep Kimi Work/Kimi Code Goal separate from Claude Code `/goal`.
 
 ## Delegation Contract
 
@@ -98,42 +105,11 @@ Every handoff to another agent — a Codex background job, a Claude subagent,
 an arbiter call — obeys these four rules. They are cheap, and each one fails
 silently when skipped, which is why they are written down instead of assumed.
 
-**1. Brief with the fixed seven-part packet.** The receiving agent starts
-with zero context, so the packet is a self-contained briefing, not a pointer
-to this conversation:
-
-```markdown
-## Task
-[Imperative, one job.]
-
-## Context
-[Why this task exists, what it is part of.]
-
-## Relevant files
-- `path/to/file.ts` — [what it is and why it matters]
-
-## Current state
-[What is done, what works, what does not.]
-
-## What was tried
-- [Approach] — [why it failed or was abandoned]
-
-## Decisions
-- [Decision] — [rationale]
-
-## Acceptance criteria
-- [ ] [Checkable outcome]
-
-## Constraints
-- [Must-not / must-preserve]
-```
-
-`What was tried` and `Constraints` are the two sections that get dropped and
-the two that cost the most. Without the first, the agent re-walks a dead end
-you already paid for. Without the second, it "improves" something you needed
-frozen. Give file paths, not file contents: a pasted copy goes stale the
-moment the repo moves, and it burns the context the agent should spend
-reading the real thing.
+**1. Use the delegation packet in `references/handoff-template.md`.** It is the
+single template for task, purpose, relevant files/current state, prior attempts,
+acceptance and constraints. Omit empty history rather than filling it with
+boilerplate. Implementation packets point at live files; tool-free planning
+packets must contain the bounded evidence the planner cannot fetch itself.
 
 **2. Preserve task semantics verbatim.** Investigate-only → "DO NOT edit
 files." Fix → "implement the fix." Refactor → "refactor, not rewrite."
@@ -156,14 +132,12 @@ sentence cannot. Belt and braces: pair it with the sandbox flag
 (`delegate-codex.sh --read-only`) so the constraint still holds when the
 model ignores prose.
 
-**4. Do not poll a running job.** Codex background jobs and Claude-backed
-planning runs take 10-30+ minutes routinely. Monitor on the interval the
-adapter defines and otherwise go idle: no hurry-up prompts, no "status?"
-re-prompts, no interrupting a working job to ask how it is going. Waiting is
-not stalling. When you do look, look at evidence rather than progress — a job
-that reports `DONE` with an empty `git status --short` was most likely never
-allowed to write (see `--writable` in `references/claude-driven.md`), and no
-amount of polling would have surfaced that.
+**4. Monitor evidence without interrupting useful work.** Prefer completion
+signals or bounded waits. A caller wait timeout does not stop the job. No new
+JSONL events alone is not proof of a hang: inspect the running command, process,
+permission state and task deadline before cancelling. `DONE` means process exit,
+not acceptance; inspect results, changes against the starting baseline and checks.
+An empty diff is expected for analysis and can be valid when work was already done.
 
 ## Bounded Claude Planning
 
@@ -201,7 +175,9 @@ Signals 2-4 depend on Claude Code CLI internals that can drift between versions.
 
 ## Output Contract
 
-When reporting back to the user, include:
+Report the outcome, checks and remaining limitations briefly; save the complete
+receipt with `--save` and link it instead of dumping every internal field.
+The saved report includes:
 
 - Current phase: planning, Codex implementation, Claude polish, review, or final fix.
 - Claude Code session id when one exists.
@@ -243,4 +219,4 @@ is always `2`; a receipt missing the four fields above is a schema v1
 receipt from before this contract and will fail `validate-receipt.py`, which
 is the intended signal to regenerate it with the current `make-receipt.py`.
 
-Do not fabricate token savings. When exact token telemetry is unavailable, report verifiable behavior instead: same Claude Code session reused, no fresh `claude -p` session, bounded handoff used, checks passed.
+Do not infer subscription quota percentages from token counts or client names. Do not fabricate token savings. When exact token telemetry is unavailable, report verifiable behavior instead: same Claude Code session reused, no fresh `claude -p` session, bounded handoff used, checks passed.

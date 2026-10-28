@@ -62,13 +62,15 @@ always_on_host_rules = false
 | `hosts.<host>.identities.<identity>.backend` | string enum | per configured identity | Required execution CLI: `claude` or `codex`. |
 | `hosts.<host>.identities.<identity>.model` | string | per configured identity | Non-empty model name or alias passed to the selected backend. |
 | `hosts.<host>.identities.<identity>.effort` | string | per configured identity | Non-empty reasoning effort passed to the selected backend. |
-| `hosts.<host>.identities.<identity>.verified` | boolean | no | Whether a smoke test or real run verified the identity. |
+| `hosts.<host>.identities.<identity>.verified` | boolean | no | Whether a live check passed; dry-run configuration validity does not set this. This flag alone is not proof of returned model or enforced effort. |
 | `hosts.<host>.identities.<identity>.verified_at` | string | no | Verification timestamp supplied by the caller. |
 | `routing.always_on_host_rules` | boolean | no | Whether setup writes persistent host routing rules; default `false`. |
 
 Every configured identity requires `backend`, `model`, and `effort`. Backend is
 validated by this engine; model and effort compatibility is checked by the
-setup/smoke layer.
+setup layer; a dry-run smoke does not establish remote availability.
+Requested model, observed model, advisory/enforced effort and known billing
+source belong in run evidence. Backend selects a CLI, not a provider or quota pool.
 
 ## Host ownership and deterministic writes
 

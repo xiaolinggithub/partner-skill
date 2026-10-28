@@ -2,7 +2,8 @@
 
 Use this flow when the skill is loaded by Codex: Codex is the outer
 orchestrator and main implementer, and Claude Code is the high-value
-planning, polish, and review agent reached through one long-lived session.
+planning and review client. Apply Workflow Depth in `SKILL.md`; small work may
+remain entirely with the driver and ordinary polish/review share one pass.
 Host detection, shared routing rules, the validation gate, monitoring
 signals, and the Partner Session Receipt contract live in `SKILL.md`;
 this file holds only the Codex-driven flow itself.
@@ -18,7 +19,7 @@ All helper scripts live in `$PARTNER_DIR` (see Tool Location in `SKILL.md`).
    - Run `bash "$PARTNER_DIR/scripts/session-snapshot.sh" start --repo <repo>` so the receipt's new-session count is computed, not guessed.
    - Identify whether the task is greenfield, feature-heavy, UI-heavy, review-only, or debugging. When the task does not fit the default profile (review-only, debugging, non-UI, non-git, monorepo, multi-day), apply the matching profile in `references/scenarios.md`.
 
-2. Start one Claude Code session for the expensive thinking loop.
+2. Start a planning session only when planning needs another perspective.
    - For repository-heavy planning through a Claude-backed `deep_reasoner`,
      especially at `xhigh`, follow `references/bounded-planning.md`: Codex
      prepares the contract packet and invokes
@@ -31,8 +32,8 @@ All helper scripts live in `$PARTNER_DIR` (see Tool Location in `SKILL.md`).
    - Ask Claude Code for a concrete implementation plan, acceptance criteria, and UI/interaction guidance.
    - Reuse the bounded runner's session id or the interactive session for later
      polish and review when it remains healthy.
-   - Do not start a separate cold review session just because Codex has finished
-     implementation. That spends tokens on rediscovery and weakens continuity.
+   - Reuse context for normal repair/review. For a high-risk independent review,
+     use a fresh session with the original requirements and bounded evidence.
 
 3. Implement primarily with Codex.
    - Convert Claude Code's plan into a short checklist.
@@ -40,29 +41,37 @@ All helper scripts live in `$PARTNER_DIR` (see Tool Location in `SKILL.md`).
    - Run the fastest relevant check after risky edits.
    - Keep Claude Code out of mechanical bulk edits, repeated lint fixes, and long command loops unless the user asks.
 
-4. Send the implemented state back to the same Claude Code session for polish.
-   - Use this especially for frontend UI, interaction quality, product feel, accessibility, and edge states.
-   - Send a bounded payload. Use `references/handoff-template.md` when possible: the original plan, changed-file list, `git diff --stat`, test/check output, risks, open questions, and only the key file snippets or full files Claude needs. `bash "$PARTNER_DIR/scripts/make-handoff.sh"` collects the evidence half automatically.
-   - Ask for prioritized findings, not broad rewrites.
-   - Codex applies accepted fixes and reruns checks.
-
-5. Run final review from the same Claude Code session.
-   - In Claude Code, use `/codex:review` when available.
-   - Treat findings as bug/risk/test issues first, style suggestions second.
-   - Codex fixes blocking findings, reruns checks, and reports final status.
-   - End with a Partner Session Receipt so the user can verify whether Claude Code context was reused.
+4. Run one acceptance review, combining polish when relevant.
+   - Use `references/handoff-template.md`: original acceptance criteria, changed
+     files, staged/unstaged/untracked evidence, checks and known risks.
+     `bash "$PARTNER_DIR/scripts/make-handoff.sh"` collects the evidence half;
+     compare it with the starting baseline before attributing files to this task.
+   - Include UI/interaction/accessibility findings for frontend work, or behavior
+     and compatibility for backend work. Ask for prioritized findings, not rewrites.
+   - `/codex:review`, when available and appropriate, can perform this review;
+     do not automatically add it after a review that already covers the criteria.
+   - Codex applies authorized fixes and reruns affected checks. Review-only tasks
+     return findings without modifying files.
+   - Save a Partner Session Receipt for a non-trivial collaboration and summarize
+     its outcome and limitations in the user-facing reply.
 
 ## Session Strategy
 
-- Small or medium task: keep one Claude Code session open for `plan -> polish -> /codex:review`.
-- Treat a new Claude Code session as expensive. Open one only when there is no reusable session, the prior session is unrecoverable, or the user explicitly asks for a fresh Claude pass.
+- Small task: keep it inline. Bounded collaboration: reuse a healthy session
+  for implementation feedback and combined review.
+- Start a fresh session when context is stale, recovery fails, independent
+  high-risk review is needed, or the user asks. Account for its context cost;
+  session reuse alone is not evidence of lower quota usage.
 - If the same Claude session gets stuck in a prompt, permission wait, or idle state, first try to continue or resume the same session with a bounded message. Do not cold-start a replacement review unless the value clearly beats the context cost.
 - Large task or huge diff: split sessions only after Codex produces a compact handoff containing the plan, changed files, key decisions, known risks, and check results.
 - For large or multi-day tasks, persist the loop state under `.partner/` in the target repo (plan, handoffs via `make-handoff.sh --save`, receipts) so a lost session restarts from the newest handoff, not from zero. See `references/failure-playbook.md`.
 - When the user says `搭子，恢复` or asks to resume the last Partner task, load `.partner/plan.md` plus the newest file in `.partner/handoffs/` as the cold-start payload instead of rebuilding context.
 - If the same Claude session gets slow, confused, or context-heavy, close it and restart with a bounded handoff only after reporting the token tradeoff.
-- Do not skip the Claude polish phase for UI/frontend work unless the user explicitly asks for a faster minimal loop.
-- If `/codex:review` hangs, times out, or gets stuck in a permission prompt, record that as a monitoring finding, stop the stuck subprocess/session, and continue with Codex-side verification.
+- Include UI quality in the acceptance review when the task has a visual surface;
+  a separate polish phase is needed only for distinct design work.
+- If review appears stuck, inspect commands and permission state before stopping
+  it. Preserve evidence, classify the blocker, then use bounded recovery or
+  Codex-side verification and report any independent-review gap.
 - If Claude Code produces no actionable polish, do not keep prompting it blindly. Capture the empty/low-signal result, run Codex verification, and report the limitation.
 - Raw `claude -p` is not the default Partner path. The bounded runner is the
   only default print-mode exception: it supplies limits, artifacts, config-only

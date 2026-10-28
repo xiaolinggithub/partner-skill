@@ -604,6 +604,8 @@ def write_recovery(
     ]
     if args.allow_unverified:
         command.append("--allow-unverified")
+    if args.expected_model:
+        command.extend(("--expected-model", args.expected_model))
     text = (
         "# Partner bounded-plan recovery\n\n"
         f"- failure: `{failure_kind}`\n"
@@ -622,6 +624,7 @@ def write_recovery(
             )
         )
         + "```bash\n"
+        + "PARTNER_CLAUDE_ENV=" + shlex.quote(args.route_env) + " "
         + " ".join(shlex.quote(part) for part in command)
         + "\n```\n\n"
         "To use another configured role, obtain explicit user approval and rerun "
@@ -641,6 +644,8 @@ def run_planner(
     claude_bin: str,
     env: Mapping[str, str],
 ) -> int:
+    args.route_env = env.get("PARTNER_CLAUDE_ENV", "clean")
+    clean_claude_env(env)  # Validate routing before creating run artifacts.
     paths = make_run_paths(args.repo, args.run_id, args.output)
     session_id = args.resume_session or str(uuid.uuid4())
     prompt = planning_prompt(packet, bool(args.resume_session))
@@ -983,10 +988,10 @@ def run_planner(
             failure_detail = (
                 "Claude reported a session id different from the requested session"
             )
-        elif identity.model not in observed_models:
+        elif (args.expected_model or identity.model) not in observed_models:
             failure_kind = "protocol_error"
             failure_detail = (
-                "Claude reported success without the exact configured model"
+                "Claude reported success without the expected returned model"
             )
         else:
             plan_error = plan_validation_error(plan)
@@ -1020,6 +1025,9 @@ def run_planner(
         "role": identity.role,
         "model": identity.model,
         "observed_models": observed_models,
+        "expected_model": args.expected_model or identity.model,
+        "route_env": env.get("PARTNER_CLAUDE_ENV", "clean"),
+        "billing_source": "unknown",
         "effort": identity.effort,
         "verified": identity.verified,
         "allow_unverified": args.allow_unverified,
@@ -1135,6 +1143,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-budget-usd", type=budget_float, default=DEFAULT_MAX_BUDGET_USD
     )
+    parser.add_argument("--expected-model", help="Explicit returned model for an intentional alias or route mapping.")
     parser.add_argument("--allow-unverified", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
@@ -1197,7 +1206,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if output_path.exists():
                 raise PlannerError(f"refusing to overwrite existing plan: {output_path}")
         return run_planner(args, identity, packet, claude_bin, os.environ)
-    except (PlannerError, OSError) as error:
+    except (PlannerError, OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 

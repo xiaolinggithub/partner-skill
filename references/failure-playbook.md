@@ -16,25 +16,32 @@ are available (`$PARTNER_DIR` = the skill's install directory).
 ## Idle Session, No Diff
 
 - Detect: session status `idle`, `git status --short` unchanged, transcript not growing.
-- Recover: Claude stopped before doing useful work. Send one bounded follow-up in the same session. If still idle, fall back to Codex-side work and keep the session for later polish/review.
+- Recover: first compare the requested intent with the result. Analysis needs no
+  diff, and implementation may already be satisfied. If work is incomplete,
+  identify a permission/dependency blocker before sending one bounded follow-up.
 - Receipt: `anomalies: idle`.
 
 ## Idle Session, Meaningful Diff
 
 - Detect: session status `idle` but the repo has new changes.
-- Recover: this is normal completion. Inspect the diff, run the fastest relevant check, then continue the loop.
+- Recover: process completion is not acceptance. Inspect changes against the
+  starting baseline and original requirements, then run the relevant check.
 - Receipt: `anomalies: none` (idle after finishing is not an anomaly).
 
 ## Empty Or Low-Signal Review
 
 - Detect: `/codex:review` or a polish pass returns nothing actionable.
-- Recover: do not keep prompting blindly. Capture the low-signal result once, run Codex verification (diff read + checks), and report the limitation.
-- Receipt: `anomalies: empty review`.
+- Recover: a completed review with no findings can be healthy. Confirm it covered
+  the requirements and evidence; empty or incomplete output is a limitation. Do
+  not prompt repeatedly just to obtain a finding.
+- Receipt: `anomalies: empty review` only when coverage/output is missing.
 
 ## Review Or Polish Hangs
 
 - Detect: no transcript/diff growth across several polls; PTY shows no prompt.
-- Recover: stop the stuck subprocess, record it, and continue with Codex-side verification. Do not cold-start a replacement review session by default.
+- Recover: inspect the active command, permission state and task deadline first.
+  Quiet builds or reasoning are not automatically hung. Preserve the checkpoint
+  before terminating a job that exceeds its deadline; record any verification gap.
 - Receipt: `anomalies: other (review hang, codex-side verification used)`.
 
 ## Bounded Planner Idle Or Timeout
@@ -53,6 +60,17 @@ Authentication is a separate failure class. `metadata.json` reports
 `authentication` only when the child CLI produces authentication evidence;
 an idle or API timeout after successful model events must not be relabeled as a
 login error.
+
+## Delegated Job Failure or Wait Timeout
+
+- A caller wait timeout is not a task termination; inspect the existing job before
+  retrying. Never submit a duplicate merely because `status --wait` timed out.
+- Authentication or permission failures need the actual blocker resolved. Missing
+  JDK/dependencies/cache access need environment repair. Do not retry unchanged.
+- A transient transport failure may receive one bounded retry after evidence is
+  preserved. A failed acceptance check receives a same-session fix packet.
+- Production replay/resend is a separate user action; transport uncertainty does
+  not authorize it. Use task-specific deadlines for known long commands.
 
 ## Session Crash Or Unrecoverable Exit
 

@@ -71,12 +71,12 @@
       "Prefer one Claude Code session for plan, polish, and final review when the task is small or medium.",
       "Have Codex implement the plan outside Claude Code and run relevant checks.",
       "Send Claude Code a bounded handoff with plan, changed files, diff stat, check output, and key file snippets.",
-      "Ask Claude Code for prioritized UI and interaction polish before running /codex:review."
+      "Combine UI/interaction quality and correctness in one acceptance review unless distinct design work requires another phase."
     ],
     "must_not": [
       "Open a fresh Claude Code session for every phase by default.",
       "Paste the whole repo or huge diffs into Claude Code when a compact handoff is enough.",
-      "Skip the UI polish phase for frontend work unless the user asks for a minimal loop."
+      "Omit relevant UI acceptance criteria merely because polish and review share one pass."
     ]
   },
   {
@@ -217,14 +217,14 @@
     "should_trigger": true,
     "expected_behavior": [
       "Name an execution channel per delegated task in the goal file: Partner background job, one-shot Codex subagent, or cheaper-Claude subagent.",
-      "Default delegable work to the Partner background job so it bills the Codex subscription, not the Claude API.",
-      "Keep quality-critical steps (architecture, split decision, integration, security/correctness, final acceptance) in Claude even though it is the expensive seat.",
-      "Have the idea-king adversarial gate confirm each task is on the right channel before delegating."
+      "Choose a background job when durable execution is useful; determine billing from authentication/routing, not the CLI name.",
+      "Keep integration and final acceptance with the driver; select adequate configured models without assuming CLI quality.",
+      "Use idea-king for uncertain or high-risk splits, not every mechanical task."
     ],
     "must_not": [
       "Route a quality-critical step to a cheaper channel just to save money.",
-      "Claim a cheaper-Claude subagent saves quota the way the Codex channels do — it still bills the API.",
-      "Burn the expensive Claude seat on mechanical work that fits a Codex channel."
+      "Infer quota savings or independent providers from different CLI names.",
+      "Delegate a tiny mechanical task when the handoff and review cost more than doing it inline."
     ]
   },
   {
@@ -335,17 +335,17 @@
     ]
   },
   {
-    "id": "host-generic-install-core-only",
-    "prompt": "（从 ~/.agents/skills/partner-skill 加载）搭子，帮我分工这个任务。",
+    "id": "host-shared-install-preserves-runtime",
+    "prompt": "（在 Claude Code 中通过指向 ~/.agents/skills/partner-skill 的软链加载）搭子，帮我分工这个任务。",
     "should_trigger": true,
     "expected_behavior": [
-      "Recognize this as a generic (~/.agents) install and state up front that it runs Core-only.",
-      "Declare that adapter primitives (delegate-codex.sh background jobs, Claude session monitoring) are unavailable instead of attempting them.",
-      "Still apply the shared routing rules, validation gate, and receipt contract from the Core."
+      "Use Claude Code runtime identity despite the shared install path.",
+      "Select Direction B and probe actual capabilities before relying on them.",
+      "Keep unknown capabilities explicit rather than infer them from the directory name."
     ],
     "must_not": [
-      "Pretend adapter primitives work from a generic install.",
-      "Silently fail when an adapter-only step is requested instead of stating the limitation."
+      "Declare known Claude Code runtime generic solely because the skill is under ~/.agents.",
+      "Assume a symlink changes runtime identity."
     ]
   },
   {
@@ -445,7 +445,7 @@
       "Run the Arbiter Protocol: send the original problem verbatim to the arbiter through its configured backend.",
       "Keep the arbiter packet free of deep_reasoner's answer, conclusion, or any leaning hint — blind means blind.",
       "Compare the two answers afterwards; on divergence, the driver rules and records the divergence point plus reasoning in the receipt.",
-      "Note same-vendor in the receipt if arbiter and deep_reasoner happen to share a backend."
+      "Note same-vendor when observed, or unknown; shared or different backends alone do not prove provider identity."
     ],
     "must_not": [
       "Tell the arbiter what deep_reasoner concluded, even as 'verify that B is right'.",
@@ -460,7 +460,7 @@
     "expected_behavior": [
       "Run the tryout in references/tryout.md: each configured identity executes its fixed micro-task through its own backend.",
       "Produce the fixed-format tryout report with measured elapsed times and per-identity PASS/FAIL.",
-      "Write verified=true with a timestamp back to the config for each passing identity, through the normal lock.",
+      "Write verified=true only for passing live identities with established routing, never for a Codex dry-run; record requested and observed models separately.",
       "On a partial pass, list which identities are live and which failed with the actual error — never claim all identities live."
     ],
     "must_not": [
@@ -499,6 +499,60 @@
       "Restart repository discovery from zero.",
       "Relabel every idle timeout as a login failure.",
       "Silently fall back to Sonnet, Opus, Codex, or another role."
+    ]
+  },
+  {
+    "id": "small-task-inline",
+    "prompt": "搭子，把这个文档里写错的参数名更正一下。",
+    "should_trigger": true,
+    "expected_behavior": [
+      "Keep a small clear task inline and run the relevant check.",
+      "Skip goal file, compulsory delegation and adversarial review."
+    ],
+    "must_not": [
+      "Force every Partner role to participate.",
+      "Add separate polish and review passes for the same trivial change."
+    ]
+  },
+  {
+    "id": "incident-read-only",
+    "prompt": "搭子，只查这笔退款的生产日志，找原因，不改代码和数据。",
+    "should_trigger": true,
+    "expected_behavior": [
+      "Preserve investigation-only intent in all packets and use read-only access.",
+      "Distinguish upstream response, local persistence, notification and final business outcome.",
+      "Report evidence and unknowns; no repair is required for investigation completion."
+    ],
+    "must_not": [
+      "Replay or resend a production request.",
+      "Edit code or data to satisfy a diagnosis-only request."
+    ]
+  },
+  {
+    "id": "shared-route-accounting",
+    "prompt": "搭子，Claude Code 和 Codex 都走同一个 ChatGPT 账号，帮我分工。",
+    "should_trigger": true,
+    "expected_behavior": [
+      "Record that the clients may share quota; backend is only a CLI.",
+      "Choose delegation based on task capability and full lifecycle overhead.",
+      "Record requested and observed model separately; unknown remains unknown."
+    ],
+    "must_not": [
+      "Promise quota savings simply by moving work to Codex.",
+      "Claim different clients imply independent model judgments."
+    ]
+  },
+  {
+    "id": "quiet-build-no-cancel",
+    "prompt": "搭子，后台 Maven 构建十分钟没新 JSONL 了。",
+    "should_trigger": true,
+    "expected_behavior": [
+      "Inspect the active command, process, permissions and task deadline.",
+      "Distinguish caller wait timeout from termination; preserve existing job evidence."
+    ],
+    "must_not": [
+      "Automatically cancel solely because JSONL is quiet.",
+      "Submit a duplicate job before establishing what happened."
     ]
   }
 ]

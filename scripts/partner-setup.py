@@ -831,7 +831,7 @@ def smoke_claude_identity(
         )
     except subprocess.TimeoutExpired:
         return False, "fresh Claude session timed out after 120 seconds"
-    except OSError as error:
+    except (OSError, ValueError) as error:
         return False, f"fresh Claude session could not start: {error}"
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -844,7 +844,8 @@ def smoke_claude_identity(
 def smoke(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     resolved = partner_config.resolve_config(args.repo, args.host, env=env)
     configured = resolved["hosts"][args.host]["identities"]
-    missing = [identity for identity in IDENTITIES if identity not in configured]
+    roles = [args.smoke_role] if args.smoke_role else IDENTITIES
+    missing = [identity for identity in roles if identity not in configured]
     if missing:
         raise SetupError(
             f"identities are not configured: {', '.join(missing)}; run --apply first"
@@ -855,7 +856,7 @@ def smoke(args: argparse.Namespace, env: Mapping[str, str]) -> int:
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md") as prompt:
         prompt.write("Resolve the configured identity only; this is a dry-run smoke check.\n")
         prompt.flush()
-        for identity in IDENTITIES:
+        for identity in roles:
             if configured[identity]["backend"] == "claude":
                 passed, detail = smoke_claude_identity(
                     args, env, identity, configured[identity]
@@ -877,8 +878,7 @@ def smoke(args: argparse.Namespace, env: Mapping[str, str]) -> int:
                 cwd=ROOT, env=dict(env), text=True, capture_output=True, check=False,
             )
             if result.returncode == 0:
-                successes.append(identity)
-                print(f"{identity}: PASS")
+                print(f"{identity}: CONFIG_VALID (dry-run only; live authentication/model not checked)")
             elif identity == "arbiter" and re.search(
                 r"(?:invalid|unknown|unsupported).*(?:--role|arbiter)|"
                 r"(?:--role|arbiter).*(?:invalid|unknown|unsupported)",
@@ -902,7 +902,7 @@ def smoke(args: argparse.Namespace, env: Mapping[str, str]) -> int:
                 identity: dict(values)
                 for identity, values in parsed_identities.items()
             }
-            for identity in IDENTITIES:
+            for identity in roles:
                 identities.setdefault(identity, dict(configured[identity]))
             for identity in successes:
                 identities[identity]["verified"] = True
@@ -1106,6 +1106,7 @@ def build_parser() -> argparse.ArgumentParser:
     routing.add_argument("--remove-routing-block", action="store_true", help="Remove a valid managed routing block.")
     parser.add_argument("--force", action="store_true", help="Skip managed-content hash validation only; structural checks still apply.")
     parser.add_argument("--exclude-choice", choices=("git-exclude", "self", "track"), default="git-exclude", help="Project config Git handling (default: git-exclude).")
+    parser.add_argument("--smoke-role", choices=IDENTITIES, help="Smoke-check only this identity.")
     parser.add_argument("--timestamp", help="Explicit smoke verified_at value; also gives deterministic backup IDs in tests.")
     parser.add_argument("--remove-config", action="store_true", help="With --uninstall, also clear this host's identities from the config (other host and top-level fields untouched).")
     parser.add_argument("--dry-run", action="store_true", help="With --uninstall, report what would be removed without writing anything.")

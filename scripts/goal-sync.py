@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Hash-checked read/write for .partner/goal.md.
 
-goal.md has no lock (see docs/config-schema.md's neighbor design in
-references/goal-to-pr.md): write frequency is low and usually one host
-drives it. Instead, a write must state the sha256 it last read; if the
-file changed since, the write aborts instead of silently clobbering the
-other host's update.
+The shared Partner lock covers read/compare/write. A writer must also
+state the sha256 it last read, so stale decisions cannot overwrite a
+newer goal even after acquiring the lock.
 """
 
 from __future__ import annotations
@@ -48,22 +46,23 @@ def write_goal(repo: Path, new_text: str, expect_sha256: Optional[str]) -> str:
     """Write new_text if the file still matches expect_sha256; else abort."""
 
     path = goal_path(repo)
-    current = read_goal(repo)
-    current_hash = sha256(current)
-    if expect_sha256 is None:
-        if current:
+    with partner_config.ConfigLock(path, owner_host="goal-sync", stale_after=float("inf")):
+        current = read_goal(repo)
+        current_hash = sha256(current)
+        if expect_sha256 is None:
+            if current:
+                raise GoalSyncError(
+                    f"goal.md already exists (sha256={current_hash}); pass "
+                    f"--expect-sha256 {current_hash} to write over the current content, "
+                    "or re-read it first"
+                )
+        elif expect_sha256 != current_hash:
             raise GoalSyncError(
-                f"goal.md already exists (sha256={current_hash}); pass "
-                f"--expect-sha256 {current_hash} to write over the current content, "
-                "or re-read it first"
+                "goal.md has been modified by another process since you last read it "
+                f"(expected sha256={expect_sha256}, found {current_hash}); re-read and retry"
             )
-    elif expect_sha256 != current_hash:
-        raise GoalSyncError(
-            "goal.md has been modified by another process since you last read it "
-            f"(expected sha256={expect_sha256}, found {current_hash}); re-read and retry"
-        )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partner_config.atomic_write(path, new_text)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partner_config.atomic_write(path, new_text)
     return sha256(new_text)
 
 
@@ -106,7 +105,7 @@ def main(argv: Optional[list] = None) -> int:
         if args.command == "read":
             return cmd_read(args)
         return cmd_write(args)
-    except (GoalSyncError, OSError) as error:
+    except (GoalSyncError, partner_config.ConfigError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 

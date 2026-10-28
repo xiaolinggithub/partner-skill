@@ -458,7 +458,7 @@ always_on_host_rules = false
         )
         self.assertNotIn(str(arbiter), manifest)
 
-    def test_codex_smoke_records_exact_timestamp(self):
+    def test_codex_dry_run_does_not_claim_live_verification(self):
         self.write_codex_native()
         self.assertEqual(0, self.run_cli(*self.codex_args())[0])
         timestamp = "2026-07-20T01:02:03Z"
@@ -472,14 +472,19 @@ always_on_host_rules = false
             timestamp,
         )
         self.assertEqual((0, ""), (status, error))
-        self.assertEqual(3, output.count("PASS"))
+        self.assertEqual(1, output.count("PASS"))
+        self.assertEqual(2, output.count("CONFIG_VALID"))
         parsed = partner_setup.partner_config.validate_config(
             partner_setup.read_text(self.repo / ".partner" / "config.toml"), "codex"
         )
         identities = parsed["hosts"]["codex"]["identities"]
         for identity in partner_setup.IDENTITIES:
-            self.assertTrue(identities[identity]["verified"])
-            self.assertEqual(timestamp, identities[identity]["verified_at"])
+            if identities[identity]["backend"] == "claude":
+                self.assertTrue(identities[identity]["verified"])
+                self.assertEqual(timestamp, identities[identity]["verified_at"])
+            else:
+                self.assertFalse(identities[identity].get("verified", False))
+                self.assertNotIn("verified_at", identities[identity])
 
         status, status_output, error = self.run_cli(
             "--status", "--host", "codex", "--repo", str(self.repo)
@@ -608,11 +613,33 @@ always_on_host_rules = false
             "claude_code",
         )
         identities = parsed["hosts"]["claude_code"]["identities"]
-        for identity in partner_setup.IDENTITIES:
+        for identity in ("deep_reasoner",):
             self.assertTrue(identities[identity]["verified"])
             self.assertEqual(
                 "2026-07-20T01:02:03Z", identities[identity]["verified_at"]
             )
+
+    def test_inherited_route_keeps_provider_but_not_parent_session(self):
+        env = {"PARTNER_CLAUDE_ENV": "inherit", "ANTHROPIC_BASE_URL": "http://localhost:1234",
+               "ANTHROPIC_AUTH_TOKEN": "local-route", "CLAUDE_CODE_SSE_PORT": "12345", "CLAUDECODE": "1"}
+        child = partner_setup._nested_claude_env(env)
+        self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], child["ANTHROPIC_AUTH_TOKEN"])
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], child["ANTHROPIC_BASE_URL"])
+        self.assertNotIn("CLAUDE_CODE_SSE_PORT", child)
+        self.assertEqual("", child["CLAUDECODE"])
+        with self.assertRaises(ValueError):
+            partner_setup._nested_claude_env({"PARTNER_CLAUDE_ENV": "typo"})
+
+    def test_single_role_smoke_does_not_call_other_identities(self):
+        self.assertEqual(0, self.run_cli(*self.claude_args())[0])
+        log = self.root / "claude-args"
+        self.env["PARTNER_TEST_CLAUDE_ARGS"] = str(log)
+        result, output, error = self.run_cli("--smoke", "--host", "claude_code", "--repo",
+                                           str(self.repo), "--smoke-role", "fast_worker")
+        self.assertEqual((0, ""), (result, error))
+        self.assertIn("fast_worker: CONFIG_VALID", output)
+        self.assertNotIn("deep_reasoner:", output)
+        self.assertFalse(log.exists())
 
     def test_nested_claude_env_strips_host_credential_vars(self):
         source = {
@@ -680,14 +707,14 @@ always_on_host_rules = false
         self.assertEqual(1, status)
         self.assertIn("deep_reasoner: FAIL", error)
         self.assertIn("model unavailable", error)
-        self.assertEqual(2, output.count("PASS"))
+        self.assertEqual(2, output.count("CONFIG_VALID"))
         parsed = partner_setup.partner_config.validate_config(
             partner_setup.read_text(self.repo / ".partner" / "config.toml"), "codex"
         )
         identities = parsed["hosts"]["codex"]["identities"]
         self.assertFalse(identities["deep_reasoner"]["verified"])
-        self.assertTrue(identities["fast_worker"]["verified"])
-        self.assertTrue(identities["arbiter"]["verified"])
+        self.assertFalse(identities["fast_worker"]["verified"])
+        self.assertFalse(identities["arbiter"]["verified"])
 
 
 if __name__ == "__main__":

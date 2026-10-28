@@ -56,17 +56,17 @@ Pick exactly one:
    the exclude choice (default: one line in `.git/info/exclude`); relay its
    report.
 6. **Automatic smoke test** — run `partner-setup.py --smoke` after apply.
-   Codex-backend identities verify through the delegate dry-run chain.
-   Claude-backend identities start a fresh, tool-free, non-persistent Claude
-   CLI session using the selected model and effort; a generated namespaced
-   agent is selected when the Claude Code host wrote one. Only a successful
-   backend check writes `verified=true` and one shared `verified_at` timestamp.
-   Apply remains a completed write if smoke fails, but the UI must visibly say
-   `安装完成，但自动检查未通过` and preserve `verified=false` for the failed
-   identity.
+   Codex identities use the delegate dry-run chain: configuration validity only,
+   not authentication, model availability or a live response; this does not set
+   `verified=true`. Claude identities start a fresh tool-free session with the
+   requested model/effort and may record live connectivity. Report observed-model
+   and actual effort evidence separately. Apply remains a completed write if a
+   check fails; preserve the failure and do not claim the identity is ready.
+   Use a single-role smoke check when only one identity changed.
+
 7. Point the user at "搭子，试跑" (`references/tryout.md`) — the real
-   end-to-end proof pass where every identity runs a micro-task and a
-   report shows each one live on its configured model. Close with a normal
+   end-to-end check where requested identities run micro-tasks and the report
+   separates configured routing, observed models and output validity. Close with a normal
    Partner Session Receipt.
 
 ## Second host joining (incremental merge)
@@ -117,3 +117,5 @@ and a structurally valid managed routing block. Config is untouched unless
 `--remove-config` is passed, which clears only `hosts.<host>.roles` — the
 other host's section, top-level fields, and `[routing]` are byte-preserved.
 `--dry-run` reports what would be removed without writing anything.
+
+For a single changed identity, use `partner-setup.py --smoke --host <host> --repo <repo> --smoke-role fast_worker`. Codex rows remain configuration-only checks.

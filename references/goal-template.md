@@ -42,7 +42,7 @@ status: pending | in_progress | delegated | review | rework-1 | rework-2 | taken
 
 Splitting a task means making **one** judgment per row: which capability
 does this work need? The three identities are defined by `搭子，配置`, each
-carrying its own backend (which CLI executes and which meter bills), model,
+carrying its own backend (which CLI executes), requested model,
 and effort — so picking the identity picks the execution channel
 automatically; there is no separate "owner" decision:
 
@@ -61,9 +61,9 @@ driving session and never spawn or delegate.
 
 At execution time, resolve the identity's config
 (`partner-config.py resolve`): `backend = codex` → submit through
-`delegate-codex.sh --host <driver> --role <identity>` (Codex subscription
-meter); `backend = claude` → spawn the `partner-<identity>` subagent
-(Claude API meter). The same identity can point at either vendor — that
+`delegate-codex.sh --host <driver> --role <identity>`; `backend = claude` →
+explicitly spawn the `partner-<identity>` subagent. Provider and billing depend
+on authentication/routing, not backend names. The same identity can point at either vendor — that
 mapping lives in `.partner/config.toml`, not in this table.
 
 Rules:
@@ -73,4 +73,6 @@ Rules:
 - `acceptance` must be verifiable (a command to run, a behavior to observe),
   not a vibe. It is what Phase 4 reviews against.
 - The `/loop` monitoring prompt reads this file first, so keep statuses
-  current — stale rows cause duplicate delegation.
+  current — stale rows cause duplicate delegation. One coordinator writes it
+  through `goal-sync.py` so read/compare/write stays locked. For small single
+  tasks, the delegation brief is sufficient and this file is optional.

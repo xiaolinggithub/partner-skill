@@ -1,6 +1,7 @@
 # Partner Memory Protocol (wrap-up phase)
 
-Run this at the end of every non-trivial Partner session, both directions.
+At wrap-up, record useful lessons only when the user and host memory policy
+authorize it. Existing automatic hooks need no duplicate manual writes.
 The point is that the *next* split decision starts smarter: which task
 types Codex handles well, which effort levels fit, where rework happened.
 
@@ -38,7 +39,7 @@ Skip sessions with nothing new to say — memory hygiene beats volume.
 
 ## Static Layer Reminder
 
-Facts that every future session must see unconditionally do not belong in
-memory stores: put them in the repo's `CLAUDE.md` (Claude Code) and
-`AGENTS.md` (Codex) instead — architecture, commands, conventions. Memory
-layers are for experience; instruction files are for law.
+Keep project facts and rules in the project's canonical `AGENTS.md` and its
+referenced sources. `CLAUDE.md` can point to that canonical file; do not copy
+rule bodies into both files. Do not edit instruction files merely to complete
+a Partner wrap-up.

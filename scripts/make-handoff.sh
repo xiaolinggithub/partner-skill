@@ -47,10 +47,20 @@ cd "$REPO"
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   GIT_STATUS="$(git status --short || true)"
-  DIFF_STAT="$(git diff --stat || true)"
-  CHANGED_FILES="$(git diff --name-only || true)"
+  DIFF_STAT="$(git diff --stat; git diff --cached --stat)"
+  CHANGED_FILES="$(python3 - <<'PYFILES'
+import json, subprocess
+paths = set()
+for command in (["git", "diff", "--name-only", "-z"],
+                ["git", "diff", "--cached", "--name-only", "-z"],
+                ["git", "ls-files", "--others", "--exclude-standard", "-z"]):
+    paths.update(p for p in subprocess.check_output(command).split(b"\0") if p)
+for path in sorted(paths):
+    print(json.dumps(path.decode("utf-8", "surrogateescape"), ensure_ascii=True))
+PYFILES
+)"
   [ -n "$GIT_STATUS" ] || GIT_STATUS="(clean working tree)"
-  [ -n "$DIFF_STAT" ] || DIFF_STAT="(no unstaged diff)"
+  [ -n "$DIFF_STAT" ] || DIFF_STAT="(no tracked diff; inspect untracked files separately)"
   [ -n "$CHANGED_FILES" ] || CHANGED_FILES="(none)"
 else
   GIT_STATUS="NOT_GIT_REPO: bounded file inventory instead"
@@ -86,11 +96,12 @@ $(printf '%s\n' "$CHANGED_FILES" | sed 's/^/  - /')
   - [TODO]
 
 ## Repo Evidence
+Worktree inventory includes pre-existing changes; compare with the task baseline before attributing ownership.
 \`\`\`text
 \$ git status --short
 $GIT_STATUS
 
-\$ git diff --stat
+\$ git diff --stat; git diff --cached --stat
 $DIFF_STAT
 
 $CHECK_EVIDENCE

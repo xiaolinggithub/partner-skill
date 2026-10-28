@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import concurrent.futures
+import threading
+import time
+from unittest import mock
+
 import contextlib
 import importlib.util
 import io
@@ -72,6 +77,26 @@ class GoalSyncTests(unittest.TestCase):
         )
         self.assertEqual((0, ""), (status, error))
         self.assertEqual("v2\n", goal_sync.read_goal(self.repo))
+
+    def test_concurrent_writers_cannot_both_accept_the_same_baseline(self):
+        baseline = goal_sync.write_goal(self.repo, "baseline", None)
+        original = goal_sync.partner_config.atomic_write
+        first_inside_write = threading.Event()
+
+        def slow_write(path, content):
+            first_inside_write.set()
+            time.sleep(0.2)
+            original(path, content)
+
+        with mock.patch.object(goal_sync.partner_config, "atomic_write", slow_write):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(goal_sync.write_goal, self.repo, "first", baseline)
+                self.assertTrue(first_inside_write.wait(2))
+                second = pool.submit(goal_sync.write_goal, self.repo, "second", baseline)
+                first.result()
+                with self.assertRaises(goal_sync.GoalSyncError):
+                    second.result()
+        self.assertEqual("first", goal_sync.read_goal(self.repo))
 
     def _write_tmp(self, content: str) -> str:
         handle = tempfile.NamedTemporaryFile("w", delete=False, suffix=".md")

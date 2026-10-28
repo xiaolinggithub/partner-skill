@@ -27,7 +27,7 @@ Usage:
                     [--label <name>] [--effort minimal|low|medium|high|xhigh|max]
                     [--model <model>] [--role deep_reasoner|fast_worker|arbiter]
                     [--host claude_code|codex]
-                    [--read-only|--writable] [--dry-run]
+                    [--read-only|--writable] [--wall-timeout <seconds>] [--dry-run]
   delegate-codex.sh status <jobId> --repo <path> [--wait] [--timeout <seconds>]
   delegate-codex.sh result <jobId> --repo <path> [--json]
   delegate-codex.sh resume <jobId> --repo <path> --prompt-file <file>
@@ -52,6 +52,10 @@ inherits the parent job's binary.
 
 Exit codes: status prints RUNNING/DONE/FAILED/CANCELLED; `status --wait`
 returns non-zero on timeout or failure so callers can branch on it.
+A wait timeout leaves the job running. --wall-timeout terminates its process
+group. DONE means process success, never acceptance; result --json includes
+acceptance=pending and execution evidence. Explicit writable jobs are serialized
+per repository; use separate worktrees for concurrent writers.
 USAGE
 }
 
@@ -74,6 +78,7 @@ job_dir() {
 }
 
 require_job() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid job id"
   JOB="$(job_dir "$1")"
   [ -d "$JOB" ] || die "job not found: $1 (looked in $REPO/$JOBS_SUBDIR)"
 }
@@ -156,7 +161,13 @@ kill_tree() {
 job_state() {
   # Prints RUNNING | DONE | FAILED | CANCELLED for $JOB.
   if [ -f "$JOB/cancelled" ]; then
-    echo "CANCELLED"
+    # Cancellation is not terminal until the runner releases its process group.
+    if grep -q '^runner_managed=true$' "$JOB/meta" && [ ! -f "$JOB/exit_code" ] && \
+       [ -f "$JOB/pid" ] && kill -0 "$(cat "$JOB/pid")" 2>/dev/null; then
+      echo "RUNNING"
+    else
+      echo "CANCELLED"
+    fi
   elif [ -f "$JOB/exit_code" ]; then
     if [ "$(cat "$JOB/exit_code")" = "0" ]; then echo "DONE"; else echo "FAILED"; fi
   elif [ -f "$JOB/pid" ] && kill -0 "$(cat "$JOB/pid")" 2>/dev/null; then
@@ -200,12 +211,13 @@ PY
 
 cmd_submit() {
   local PROMPT_FILE="" LABEL="task" EFFORT="high" MODEL="" ROLE="" CONFIG_HOST="codex" READ_ONLY="false" WRITABLE="false" DRY_RUN="false"
-  local EFFORT_EXPLICIT="false" MODEL_EXPLICIT="false"
+  local EFFORT_EXPLICIT="false" MODEL_EXPLICIT="false" WALL_TIMEOUT="0"
   local EFFORT_SOURCE="default" MODEL_SOURCE="default"
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --repo) REPO="${2:-}"; shift 2 ;;
       --prompt-file) PROMPT_FILE="${2:-}"; shift 2 ;;
+      --wall-timeout) WALL_TIMEOUT="${2:-}"; shift 2 ;;
       --label) LABEL="${2:-}"; shift 2 ;;
       --effort) EFFORT="${2:-}"; EFFORT_EXPLICIT="true"; shift 2 ;;
       --model) MODEL="${2:-}"; MODEL_EXPLICIT="true"; shift 2 ;;
@@ -220,6 +232,8 @@ cmd_submit() {
   require_repo
   [ "$READ_ONLY" = "true" ] && [ "$WRITABLE" = "true" ] && die "--read-only and --writable are mutually exclusive"
   [ -n "$PROMPT_FILE" ] && [ -f "$PROMPT_FILE" ] || die "--prompt-file is required and must exist"
+  [[ "$LABEL" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "invalid label"
+  [[ "$WALL_TIMEOUT" =~ ^[0-9]+$ ]] || die "wall timeout must be seconds >= 0"
   case "$ROLE" in ""|deep_reasoner|fast_worker|arbiter) ;; *) die "invalid --role: $ROLE" ;; esac
   case "$CONFIG_HOST" in claude_code|codex) ;; *) die "invalid --host: $CONFIG_HOST" ;; esac
 
@@ -274,7 +288,8 @@ cmd_submit() {
       "$CODEX_BIN" "$CODEX_BIN_SOURCE" "$CODEX_VERSION" "$READ_ONLY" "$(sandbox_label "$READ_ONLY" "$WRITABLE")" "$(now_utc)"
   } >"$JOB/meta"
 
-  write_run_script "$JOB" "$EFFORT" "$MODEL" "$READ_ONLY" "" "$WRITABLE"
+  printf 'wall_timeout=%s\nrunner_managed=true\n' "$WALL_TIMEOUT" >>"$JOB/meta"
+  write_run_script "$JOB" "$EFFORT" "$MODEL" "$READ_ONLY" "" "$WRITABLE" "$WALL_TIMEOUT"
   launch_job "$JOB"
   echo "$JOB_ID"
 }
@@ -298,6 +313,14 @@ cmd_resume() {
   [ "$(job_state)" = "RUNNING" ] && die "parent job still running; wait or cancel first"
 
   local PARENT_JOB="$JOB"
+  if [ "$READ_ONLY" = "false" ] && [ "$WRITABLE" = "false" ]; then
+    case "$(sed -n 's/^sandbox=//p' "$PARENT_JOB/meta")" in
+      read-only) READ_ONLY="true" ;;
+      workspace-write) WRITABLE="true" ;;
+    esac
+  fi
+  local WALL_TIMEOUT
+  WALL_TIMEOUT="$(sed -n 's/^wall_timeout=//p' "$PARENT_JOB/meta")"
   local SESSION_ID
   SESSION_ID="$(extract_session_id)"
   [ -n "$SESSION_ID" ] || die "no session id found in $PARENT_JOB/log.jsonl; cannot resume"
@@ -330,45 +353,41 @@ cmd_resume() {
       "$(sandbox_label "$READ_ONLY" "$WRITABLE")" "$(now_utc)" "$PARENT_ID"
   } >"$JOB/meta"
 
-  write_run_script "$JOB" "${EFFORT:-high}" "" "$READ_ONLY" "$SESSION_ID" "$WRITABLE"
+  # Keep role and requested model evidence across repair rounds.
+  sed -n '/^role=/p; /^backend=/p; /^config_host=/p; /^model_source=/p; /^effort_source=/p' "$PARENT_JOB/meta" >>"$JOB/meta"
+  printf 'requested_model=%s\nwall_timeout=%s\nrunner_managed=true\n' \
+    "$(sed -n 's/^requested_model=//p' "$PARENT_JOB/meta"; sed -n '/^model=inherit/!s/^model=//p' "$PARENT_JOB/meta")" "${WALL_TIMEOUT:-0}" >>"$JOB/meta"
+  write_run_script "$JOB" "${EFFORT:-high}" "" "$READ_ONLY" "$SESSION_ID" "$WRITABLE" "${WALL_TIMEOUT:-0}"
   launch_job "$JOB"
   echo "$JOB_ID"
 }
 
 write_run_script() {
-  local job="$1" effort="$2" model="$3" read_only="$4" session_id="$5" writable="${6:-false}"
+  local LC_ALL=C  # Bash 3.2 must quote non-ASCII paths byte by byte.
+  local job="$1" effort="$2" model="$3" read_only="$4" session_id="$5" writable="${6:-false}" wall_timeout="${7:-0}"
+  local args=("$CODEX_BIN" exec)
+  if [ -n "$session_id" ]; then
+    args+=(resume "$session_id" --json -c "model_reasoning_effort=\"$effort\"")
+    [ "$read_only" != "true" ] || args+=(-c 'sandbox_mode="read-only"')
+    [ "$writable" != "true" ] || args+=(-c 'sandbox_mode="workspace-write"')
+  else
+    args+=(--json -C "$REPO" -c "model_reasoning_effort=\"$effort\"")
+    is_git_repo "$REPO" || args+=(--skip-git-repo-check)
+    [ -z "$model" ] || args+=(-m "$model")
+    [ "$read_only" != "true" ] || args+=(-s read-only)
+    [ "$writable" != "true" ] || args+=(-s workspace-write)
+  fi
   {
     echo '#!/usr/bin/env bash'
-    echo 'set -uo pipefail'
-    printf 'JOB=%q\n' "$job"
-    printf 'REPO=%q\n' "$REPO"
-    printf 'CODEX_BIN=%q\n' "$CODEX_BIN"
-    echo 'PROMPT="$(cat "$JOB/prompt.md")"'
-    # </dev/null: a long prompt can make codex exec also wait on stdin for
-    # more input ("Reading additional input from stdin..."); the background
-    # job's stdin is never closed on its own, so without this the job hangs
-    # forever with no further JSONL events.
-    if [ -n "$session_id" ]; then
-      # `codex exec resume` accepts no -C/-s flags: cwd comes from the shell,
-      # sandbox and effort go through -c config overrides.
-      local args="--json -c 'model_reasoning_effort=\"$effort\"'"
-      [ "$read_only" = "true" ] && args="$args -c 'sandbox_mode=\"read-only\"'"
-      # Verified against codex-cli 0.146.1: a resumed session re-reads the
-      # sandbox policy, so -c widens it, it is not pinned to the parent run.
-      [ "$writable" = "true" ] && args="$args -c 'sandbox_mode=\"workspace-write\"'"
-      echo 'cd "$REPO"'
-      printf '"$CODEX_BIN" exec resume %q "$PROMPT" %s >"$JOB/log.jsonl" 2>"$JOB/stderr.log" </dev/null\n' "$session_id" "$args"
-    else
-      local args="--json -C \"\$REPO\" -c 'model_reasoning_effort=\"$effort\"'"
-      # Non-git --repo targets need --skip-git-repo-check or codex exec
-      # refuses to run ("Not inside a trusted directory").
-      is_git_repo "$REPO" || args="$args --skip-git-repo-check"
-      [ -n "$model" ] && args="$args -m \"$model\""
-      [ "$read_only" = "true" ] && args="$args -s read-only"
-      [ "$writable" = "true" ] && args="$args -s workspace-write"
-      printf '"$CODEX_BIN" exec "$PROMPT" %s >"$JOB/log.jsonl" 2>"$JOB/stderr.log" </dev/null\n' "$args"
-    fi
-    echo 'echo $? >"$JOB/exit_code"'
+    echo 'set -euo pipefail'
+    printf 'JOB=%q\nREPO=%q\n' "$job" "$REPO"
+    echo 'cd "$REPO"'
+    printf 'exec python3 %q --job-dir "$JOB"' "$SCRIPT_DIR/run-codex-job.py"
+    [ "$wall_timeout" = "0" ] || printf ' --wall-timeout-seconds %q' "$wall_timeout"
+    [ "$writable" != "true" ] || printf ' --write-lock %q' "$REPO/.partner/writer.lock"
+    printf ' --'
+    printf ' %q' "${args[@]}"
+    echo ' "$(cat "$JOB/prompt.md")"'
   } >"$job/run.sh"
   chmod +x "$job/run.sh"
 }
@@ -414,6 +433,7 @@ except Exception: print("")' 2>/dev/null || true)"
   echo "state: $state"
   echo "last_event: ${last_event:-none}"
   echo "log: $JOB/log.jsonl"
+  [ "$state" != "DONE" ] || echo "acceptance: pending (review required)"
   if [ "$state" = "RUNNING" ] && [ "$WAIT" = "true" ]; then
     echo "note: timed out after ${TIMEOUT}s while still running"
     return 2
@@ -435,10 +455,15 @@ cmd_result() {
   require_job "$JOB_ID"
   extract_session_id >/dev/null || true
 
-  python3 - "$JOB/log.jsonl" "$JOB/session_id" "$AS_JSON" <<'PY'
+  python3 - "$JOB/log.jsonl" "$JOB/session_id" "$AS_JSON" "$JOB" <<'PY'
 import json, sys
+from pathlib import Path
 
 log_path, sid_path, as_json = sys.argv[1], sys.argv[2], sys.argv[3] == "true"
+job = Path(sys.argv[4])
+meta = dict(line.split("=", 1) for line in (job / "meta").read_text().splitlines() if "=" in line)
+execution = json.loads((job / "execution.json").read_text()) if (job / "execution.json").exists() else {}
+observed_models = set()
 messages, commands, reasoning, usage = [], [], [], {}
 try:
     with open(log_path, encoding="utf-8") as fh:
@@ -450,6 +475,9 @@ try:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            model = event.get("model") or (event.get("item") or {}).get("model")
+            if isinstance(model, str):
+                observed_models.add(model)
             etype = event.get("type", "")
             item = event.get("item") or {}
             itype = item.get("type") or item.get("item_type") or ""
@@ -478,6 +506,13 @@ if as_json:
         "agent_message": messages[-1] if messages else "",
         "commands": [c for c in commands if c],
         "usage": usage,
+        "execution": execution,
+        "acceptance": "pending",
+        "role": meta.get("role", "unknown"),
+        "requested_model": meta.get("requested_model", meta.get("model", "unknown")),
+        "observed_models": sorted(observed_models),
+        "effort": meta.get("effort", "unknown"),
+        "billing_source": "unknown",
     }, ensure_ascii=False))
 else:
     print(f"session_id: {session_id or 'unknown'}")
@@ -500,11 +535,14 @@ cmd_cancel() {
   done
   require_repo
   require_job "$JOB_ID"
-  if [ -f "$JOB/pid" ]; then
+  [ "$(job_state)" = "RUNNING" ] || die "job is not running"
+  if grep -q '^runner_managed=true$' "$JOB/meta"; then
+    kill -TERM "$(cat "$JOB/pid")"
+  else
     kill_tree "$(cat "$JOB/pid")"
   fi
   touch "$JOB/cancelled"
-  echo "cancelled: $JOB_ID"
+  echo "cancellation requested: $JOB_ID"
 }
 
 cmd_list() {

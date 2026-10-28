@@ -1,20 +1,22 @@
 # Partner Tryout (搭子，试跑)
 
-The first-run proof pass. Triggered by "搭子，试跑" after `搭子，配置` has
-been applied. Each configured identity runs one small, self-contained
-micro-task; the result is a report that lets a first-time user conclude in
-one glance: my identities are actually live, on the models I chose. This is
-a real end-to-end run (it spends real quota, minutes not seconds at high
-effort tiers). `partner-setup.py --smoke` is the bounded installation check:
-Codex identities use the delegate dry-run chain, while each Claude identity
-uses one minimal tool-free fresh session so model/effort/auth are genuinely
-checked. The tryout remains the proof that all three identities can complete
-their intended work, not merely answer the installation probe.
+A live check after configuration, not a benchmark of engineering quality or
+quota savings. Run only the role the user changed/requested when appropriate;
+a full first-run tryout covers all three. Use a bounded context and execute
+independent micro-tasks concurrently; avoid full-repo discovery.
+
+`partner-setup.py --smoke` checks Codex configuration through dry-run and does
+not promote those roles to `verified`. Claude smoke obtains a minimal live
+response; this alone does not prove the returned model or enforced effort.
+For tryout, capture requested/observed model and report missing observations as
+`unknown`. Intentional routing mappings are valid when declared; never infer
+actual provider from the CLI or a role name in the prompt.
 
 ## The three micro-tasks
 
 Fixed content, independent of the target repo's state. Run them through
-each identity's configured backend (subagent spawn for `backend=claude`,
+each identity's configured backend (explicit namespaced/model-selected
+subagent for `backend=claude`,
 `delegate-codex.sh --host <driver> --role <identity>` for `backend=codex`):
 
 1. **fast_worker — mechanical**: "Sort the keys of this JSON object
@@ -22,6 +24,8 @@ each identity's configured backend (subagent spawn for `backend=claude`,
    result:
    `{"b":{"z":1,"a":{"c":3}},"a":[2,1],"c":"x"}`"
    Pass = returns exactly the correctly sorted, valid JSON, nothing else.
+   Parse and check keys programmatically; Markdown fences are a format failure,
+   distinct from connection failure. Do not change the standard between runs.
 2. **deep_reasoner — reasoning**: "A CLI tool stores per-project config. A
    is one dotfile per project in the repo (committed); B is one central
    file in the user's home keyed by project path. Name the decisive
@@ -49,20 +53,25 @@ arbiter        codex    gpt-5.6-sol   xhigh   2m10s    PASS (agrees with deep_re
 verdict: all identities live
 ```
 
-- `elapsed` is measured, not estimated. High-effort tiers legitimately take
-  minutes; report reality.
+- `elapsed` is each job's actual start-to-finish duration, not time from a shared
+  launch marker to result collection. Never use an unrelated file mtime. If no
+  valid timing evidence exists, report `unknown`.
+- The table's model is the request. Append observed model and effort evidence
+  separately; advisory effort is not an enforced parameter.
 - `result` for the arbiter row states agreement or names the divergence in
   a few words. A divergence is not a failure.
 - A failed row states the actual error (CLI missing, model rejected,
   timeout) and the fix pointer — rerun `搭子，配置` or install the missing
   CLI. `verdict` then lists which identities are live and which are not;
   never report `all identities live` on a partial pass.
-- After each passing row, write `verified=true` + `verified_at` back to
+- After a passing live row with its routing established, write `verified=true`
+  + `verified_at` back to
   the config via
   `python3 "$PARTNER_DIR/scripts/partner-config.py" --host <driver> set --role <identity> --verified --verified-at <utc>`
   (goes through the same lock as every config write).
-- Close the session with a normal Partner Session Receipt; the three rows
-  become its `roles_used` entries with `verified: true`.
+- Save a Partner Session Receipt containing only roles actually run and their
+  actual verification state. Partial or format failures must not become
+  `verified: true`; show connectivity and format results separately.
 
 ## Rules
 

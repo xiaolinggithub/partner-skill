@@ -2,11 +2,10 @@
 
 Use this flow when the skill is loaded inside Claude Code and the user asks
 Claude to split work with Codex ("双向搭子", "分工给 codex", "让 codex 做",
-"codex 后台跑"). Claude Code is the driver: it plans, delegates
-quota-pressure work to Codex (subscription billing), monitors the background
-jobs, and quality-gates everything before accepting it. The goal is saving
-Claude API spend without lowering quality — the full-review gate in Phase 4
-is what makes that claim honest.
+"codex 后台跑"). Claude Code is the driver; its routed model may be Claude,
+GPT or another provider. Apply Workflow Depth in `SKILL.md` before starting
+these phases. Delegate only when the task benefits from separation, and verify
+all results. CLI selection alone says nothing about billing or savings.
 
 All helper scripts live in `$PARTNER_DIR` (see Tool Location in `SKILL.md`).
 Job state lives under `<repo>/.partner/jobs/`.
@@ -15,23 +14,24 @@ Job state lives under `<repo>/.partner/jobs/`.
 
 - Confirm the Codex CLI: `codex --version`. If missing, stop and tell the
   user this flow needs the Codex CLI installed and authenticated.
-- Check the target repo's `AGENTS.md` for the line
-  `DO NOT send optional commentary`. If absent, ask the user once whether to
-  append it (it reduces Codex filler output and keeps its replies dense).
-  Never edit the user's repo files silently.
+- Read the project's instructions and preserve the user's requested intent.
+  Keep output concise in the delegation packet; do not ask to modify AGENTS.md
+  just to enable Partner.
+- Check required runtime, build command and writable cache roots (for example
+  the project's JDK and Maven cache) before starting implementation.
 - Run `git status --short` and note pre-existing dirt so Codex's diff can be
   isolated later.
 
 ## Phase 1 — Plan and Split (goal file)
 
-- Refine the user's request into a concrete plan, then write
+- For a small or single bounded task, keep the brief in the prompt/job; a goal
+  file is optional. For multi-job or resumable work, write
   `<repo>/.partner/goal.md` (template: `references/goal-template.md`): the
   overall goal as one why-forward sentence, a task table, and the checkpoint
-  rule from `references/fable5-principles.md`. If the repo may have a
-  second host writing the same goal.md concurrently, use
+  rule from `references/fable5-principles.md`. One coordinator owns state. Use
   `scripts/goal-sync.py read`/`write --expect-sha256 <hash>` instead of
-  editing the file directly — it aborts instead of silently clobbering the
-  other host's update.
+  editing the file directly — the helper locks read/compare/write and rejects a
+  stale baseline instead of silently clobbering another update.
 - Split tasks by making one judgment per row — which capability does this
   work need (see the identity definitions in `references/goal-template.md`):
   - `fast_worker` for mechanical, spec-complete work (refactors, test
@@ -42,14 +42,13 @@ Job state lives under `<repo>/.partner/jobs/`.
   - identity `-` for what the driver keeps inline: architecture, the split
     decision itself, cross-task integration, security/correctness-critical
     paths, final acceptance. Never route these to a cheaper identity to
-    save money, and never burn the driver's seat on mechanical work.
-  Which CLI executes and which meter bills follows from the identity's
-  configured `backend` (`搭子，配置`), not from a separate per-task choice.
+    save money. Keep tiny mechanical work inline when delegation costs more.
+  The configured `backend` selects a CLI, not a provider or quota pool.
   Two escape hatches remain for edge cases: a one-shot Codex subagent
   (e.g. a rescue agent) for a stuck step needing a second diagnosis with
   no durable state, and a raw Task-tool subagent when no Partner identity
   fits — billing notes for both in `references/fable5-principles.md`.
-- Adversarial gate: run the idea-king adversarial review (the `idea-king`
+- For uncertain, cross-module or high-risk plans, run the idea-king adversarial review (the `idea-king`
   skill, or `references/../idea-king/SKILL.md` content inline) against the
   split. It must answer three questions: does each delegated task really
   not need the expensive tier, does the integration cost of the split
@@ -63,7 +62,7 @@ Job state lives under `<repo>/.partner/jobs/`.
 This lookup applies **only to identities whose configured `backend` is
 `claude`** — an identity with `backend = codex` never enters it: that work
 goes through `delegate-codex.sh` (Phase 2), and spawning a Task subagent
-for it would silently swap in the wrong vendor and meter. For a
+for it would silently swap execution channels. For a
 claude-backend identity, resolve *which* agent definition to spawn with
 this three-level lookup, in order:
 
@@ -72,17 +71,17 @@ this three-level lookup, in order:
    (project or global scope; check
    `python3 "$PARTNER_DIR/scripts/partner-config.py" --host claude_code resolve`
    for the configured identity, or just try spawning the namespaced agent),
-   use it. Its model/effort came from the user's own setup choice.
+   use it explicitly. Its model came from setup; generated effort text is
+   advisory, not proof of an enforced API parameter.
 2. **The user's own similarly-named agent** — if no `partner-*` agent exists
    but the user has their own `deep-reasoner.md` / `fast-worker.md` (or an
    agent whose description clearly matches the identity), use it as-is.
-   Never rename, edit, or treat it as if it were partner-managed.
-3. **Generic `Task` tool** — no matching agent either way: spawn a plain
-   Task-tool subagent with the identity described in the prompt. This is the
-   fallback, not a signal that setup is missing something the task needs.
-
-A repo with no `搭子，配置` run yet simply falls through to level 3 every
-time; that is normal, not broken.
+   Never rename or edit it. Confirm its routing matches the intended identity;
+   a similar name alone is not verification.
+3. **Generic host subagent** — use it only if the intended model can be selected
+   explicitly. A role name in the prompt does not select a model. If this cannot
+   be established, report the routing limitation rather than claim the identity
+   ran. Configure missing identities before delegating through them.
 
 ## Arbiter Protocol — 盲解仲裁
 
@@ -97,14 +96,14 @@ for one solver's answer:
    answer, conclusion, or any leaning hint ("X thinks A, verify it" is
    already contaminated). Blind means blind — a contaminated run silently
    produces fake agreement and must be rerun, not patched.
-3. Compare the two answers. Agreement → adopt, note dual-verified.
+3. Compare the two answers against evidence. Agreement is corroboration, not
+   proof; record both independent runs.
    Disagreement → the driver rules, and records the point of divergence
    plus the ruling's reasoning in the receipt (both solvers appear in
    `roles_used`; the divergence goes in the report/Notes).
-4. The blind check is strongest when arbiter and deep_reasoner run on
-   different vendors (the wizard's default presets guarantee this); if the
-   config has them same-vendor, the protocol still runs but the receipt
-   notes `same-vendor` so the weaker independence is visible.
+4. Record the observed model/provider for each solver, or `unknown`. Different
+   CLIs do not guarantee different models; routed clients may share a provider.
+   Note `same-vendor` when known rather than infer diversity from backend names.
 
 This is distinct from the idea-king gate: 点子王 attacks a *plan* you
 already have; the arbiter independently *solves the same problem* with no
@@ -145,11 +144,12 @@ clear error (run `搭子，配置` first, or fall back to an explicit `--effort`
 for this one job and note it in `Notes`); identity configured with
 `backend = claude` → refusal with a pointer to spawn the `partner-<identity>`
 subagent instead — this is the guard against silently running a
-claude-backend identity on the wrong vendor.
+claude-backend identity through the wrong CLI.
 
 - Use `--read-only` for scan/review jobs that must not modify the repo.
-- Record the returned jobId in the goal file's task row. Independent tasks
-  can be submitted in parallel.
+- Record the returned jobId in the task brief or goal file. Keep one writer per
+  working directory. Parallelize read-only tasks; isolate independent write tasks
+  in worktrees and make the driver responsible for integration.
 
 ## Phase 3 — Monitor (loop)
 
@@ -160,28 +160,36 @@ claude-backend identity on the wrong vendor.
   `delegate-codex.sh status` for every running jobId (tail the job's
   `log.jsonl` for the last event), update task statuses in the goal file,
   and when no job is left running, stop the loop and continue with Phase 4.
-- A job stuck with no new JSONL events for two consecutive ticks, or a
-  `status` of FAILED, is a monitoring anomaly: cancel it, read
-  `stderr.log`, and either resubmit with a corrected prompt or take the
-  task back into Claude. Record the anomaly for the receipt.
-- **`DONE` is not evidence of work.** Before moving to Phase 4, run
-  `git status --short` on any job that was supposed to change files. `DONE`
-  plus an empty diff is an anomaly, not a completed task — most often a
-  read-only sandbox (see `--writable` in Phase 2), sometimes a job that
-  decided the work was already done. Read `stderr.log` for
-  `writing is blocked by read-only sandbox` before assuming anything else.
-  Never open a fix round without knowing which of the two it was: resuming
-  a blocked job with "please try again" burns a full round and changes
-  nothing.
+- For an explicit task runtime limit, pass `--wall-timeout <seconds>` on submit.
+  The runner records timing/failure in `execution.json` and cleans up its process
+  group on expiry. Explicit `--writable` jobs hold a workspace write lock; a busy
+  writer returns `writer_busy` without starting another model call.
+- A wait timeout only ends the caller's wait. Check the process and configured
+  task deadline before taking action; do not launch a duplicate job.
+- No new JSONL events across two ticks is a reason to inspect, not cancel.
+  Long builds/tests can be quiet. Check the running command, permissions and
+  stderr; use that command's timeout where available. Authentication, missing
+  dependencies, transport errors and failed acceptance require different fixes.
+- Retry a transient failure at most once after preserving evidence; fix a
+  deterministic blocker before retrying. Save the checkpoint before terminating
+  a job that exceeds its task deadline. Never retry a production replay or resend
+  merely because a response was missing.
+- **`DONE` means process completion, not task acceptance.** Collect result JSON,
+  inspect the full task diff (staged, unstaged and untracked) against the starting
+  baseline, and run the agreed checks. For analysis, inspect evidence instead of
+  expecting a diff. An implementation with no changes may already be satisfied;
+  verify that or identify a permission failure before requesting a fix round.
 
 ## Phase 4 — Full Review Gate
 
 - Collect each finished job:
   `bash "$PARTNER_DIR/scripts/delegate-codex.sh" result <jobId> --repo "$REPO"`.
-- Claude reviews the complete diff itself — `git diff` (scoped to the files
-  the job touched), plus the fastest relevant check. This is a full review
-  by default, not a sample. Do not accept work you have not read.
-- Review against the acceptance criteria in `.partner/goal.md`, not against
+- The driver performs one complete acceptance review, combining any relevant
+  polish with correctness review. Include staged, unstaged and untracked changes,
+  scoped against the starting baseline, plus the relevant check. After a fix,
+  review the changed area and affected acceptance criteria rather than repeat an
+  unchanged full pass.
+- Review against the acceptance criteria in the task brief or `.partner/goal.md`, not against
   the diff alone. A reviewer given only the diff confidently redefines the
   spec as "internally consistent with what changed" and misses tasks that
   were never done — in Superpowers 6, diff-only reviewers caught 0 of 5
@@ -194,10 +202,10 @@ bash "$PARTNER_DIR/scripts/delegate-codex.sh" resume <jobId> \
   --repo "$REPO" --prompt-file <fix-notes>
 ```
 
-- Maximum two fix rounds per task. Still failing after that: take the task
-  back and finish it in Claude; note the takeback in the goal file and
-  receipt. Optionally run the gstack `/codex` review on the final combined
-  diff as an independent third-party gate.
+- Maximum two fix rounds per task. Then diagnose the remaining blocker and
+  either finish within the driver's capabilities or report required user input.
+  Record the takeback. A fresh independent final review is justified for high-risk
+  changes; do not add another review just because a command exists.
 
 ## Phase 4.5 — Delivery (opt-in, `references/goal-to-pr.md`)
 
@@ -218,7 +226,9 @@ this phase entirely on the default lightweight flow above.
 
 ## Phase 5 — Wrap Up
 
-- Mark tasks done in `.partner/goal.md`; stop any remaining `/loop`.
+- Mark tasks done only after acceptance; update `.partner/goal.md` if one exists
+  and stop any remaining `/loop`. Save the full receipt; show the user a concise
+  outcome, checks and remaining limitations.
 - Emit the Partner Session Receipt with `direction: claude-driven` and
   `codex_jobs: <count>`; in this direction `claude_session` refers to the
   current session and `new_claude_p_sessions` is normally `0`. Set `host`,

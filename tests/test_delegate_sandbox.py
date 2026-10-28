@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import json
+import shlex
 import subprocess
 import tempfile
 import time
@@ -151,8 +153,62 @@ class DelegateSandboxTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         job = repo / ".partner" / "jobs" / result.stdout.strip().splitlines()[-1]
         run_script = (job / "run.sh").read_text(encoding="utf-8")
-        self.assertIn('sandbox_mode="workspace-write"', run_script)
+        self.assertIn('sandbox_mode="workspace-write"', shlex.split(run_script.splitlines()[-1]))
         self.assertNotIn("-s workspace-write", run_script)
+
+    def test_resume_keeps_explicit_parent_sandbox_and_requested_model(self):
+        for flag, sandbox in (("--read-only", "read-only"), ("--writable", "workspace-write")):
+            with self.subTest(sandbox=sandbox):
+                _, repo, prompt, _, env = self.workspace()
+                parent, _ = self.submit(env, repo, prompt, flag, "--model", "gpt-test")
+                result = self.run_script(env, "resume", parent, "--repo", str(repo), "--prompt-file", str(prompt))
+                self.assertEqual(0, result.returncode, result.stderr)
+                job = repo / ".partner/jobs" / result.stdout.strip()
+                args = shlex.split((job / "run.sh").read_text().splitlines()[-1])
+                self.assertIn(f'sandbox_mode="{sandbox}"', args)
+                meta = self.parsed((job / "meta").read_text())
+                self.assertEqual(sandbox, meta["sandbox"])
+                self.assertEqual("gpt-test", meta["requested_model"])
+                for _ in range(50):
+                    if (job / "exit_code").exists():
+                        break
+                    time.sleep(0.1)
+
+    def test_cancelled_runner_cannot_resume_until_cleanup_finishes(self):
+        _, repo, prompt, _, env = self.workspace()
+        job = repo / ".partner/jobs/job-cancelling"
+        job.mkdir(parents=True)
+        (job / "meta").write_text("runner_managed=true\n")
+        (job / "pid").write_text(str(os.getpid()))
+        (job / "cancelled").touch()
+        result = self.run_script(env, "resume", job.name, "--repo", str(repo), "--prompt-file", str(prompt))
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("parent job still running", result.stderr)
+        (job / "exit_code").write_text("130\n")
+        result = self.run_script(env, "status", job.name, "--repo", str(repo))
+        self.assertIn("state: CANCELLED", result.stdout)
+
+    def test_result_separates_process_completion_from_acceptance(self):
+        _, repo, prompt, _, env = self.workspace()
+        job_id, _ = self.submit(env, repo, prompt, "--model", "gpt-test")
+        result = self.run_script(env, "result", job_id, "--repo", str(repo), "--json")
+        self.assertEqual(0, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual("pending", report["acceptance"])
+        self.assertEqual("unknown", report["billing_source"])
+        self.assertEqual([], report["observed_models"])
+        self.assertEqual("gpt-test", report["requested_model"])
+        self.assertEqual(0, report["execution"]["returncode"])
+        self.assertGreaterEqual(report["execution"]["elapsed_seconds"], 0)
+
+    def test_job_wall_timeout_is_enforced_without_a_polling_host(self):
+        _, repo, prompt, codex, env = self.workspace()
+        codex.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo fake; exit; fi\nsleep 30\n')
+        job_id, job = self.submit(env, repo, prompt, "--wall-timeout", "1")
+        self.assertEqual("124", (job / "exit_code").read_text().strip())
+        self.assertEqual("wall_timeout", json.loads((job / "execution.json").read_text())["failure_kind"])
+        result = self.run_script(env, "status", job_id, "--repo", str(repo))
+        self.assertNotEqual(0, result.returncode)
 
     def test_resume_prefers_explicit_partner_codex_bin_over_parent(self):
         # Inheriting the parent binary unconditionally made PARTNER_CODEX_BIN

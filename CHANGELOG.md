@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Engineering workflow hardening
+
+- docs: scale both host flows by task risk; keep small work inline and combine ordinary polish/review without weakening acceptance
+- docs: separate CLI, requested/observed model and billing; support intentional routes without claiming independent providers or quota savings
+- docs: preserve read-only investigation intent, single-writer ownership, full worktree evidence and failure-specific recovery
+- docs: distinguish configuration dry-run, live verification, process completion and task acceptance; keep full receipts on disk with concise user summaries
+- test: align behavior prompts with risk-based routing, read-only incidents and quiet long-running builds
+
+
 ### Direction B sandbox
 
 - fix: add `--writable` to `delegate-codex.sh submit`/`resume` — with no sandbox flag a job inherits `codex exec`'s own default, which is read-only unless the user set `sandbox_mode` in `~/.codex/config.toml`, so implementation jobs finished `DONE` having written nothing

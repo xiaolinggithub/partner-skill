@@ -1,7 +1,7 @@
 ---
 name: idea-king
 description: |
-  点子王 (Idea King) — reason from first principles & run adversarial review. A thinking partner for the Partner (搭子) workflow and for standalone use. Use when the user says "点子王", "idea king", "第一性原理", "从第一性原理出发", "奥卡姆剃刀", "墨菲定律", "科斯定理", "对抗式审查", "挑战这个方案", "attack this plan", "盘问", "grill this plan", or when a plan / architecture / work split needs to be stress-tested before execution. Partner Direction B calls this skill on every division-of-labor plan before delegating.
+  点子王 (Idea King) — reason from first principles & run adversarial review. A thinking partner for the Partner (搭子) workflow and for standalone use. Use when the user says "点子王", "idea king", "第一性原理", "从第一性原理出发", "奥卡姆剃刀", "墨菲定律", "科斯定理", "对抗式审查", "挑战这个方案", "attack this plan", "盘问", "grill this plan", or when a plan / architecture / work split needs to be stress-tested before execution. Partner calls this skill for uncertain, cross-module or high-risk plans, not every delegation.
 ---
 
 # 点子王 (Idea King)
@@ -84,10 +84,9 @@ When reviewing a Partner work split, always attack these claims:
   If the sum beats doing it in place, the task stays in-house.
 - "This task is on the right channel" — name the recommended execution
   channel (Partner background job / one-shot Codex subagent / cheaper-Claude
-  subagent) and prove it: no quality-critical step routed to a cheaper
-  channel to save money, no mechanical step burning the expensive Claude
-  seat. Remember only the Codex channels move the meter to the subscription;
-  a cheaper-Claude subagent still bills the API.
+  subagent) and prove it: no quality-critical step routed to an inadequate model to save money. Small
+  mechanical tasks can stay inline when handoff costs more. Backend names do not
+  establish billing: inspect routing/authentication and shared quota pools.
 - "The delegation prompt is ready to send" — attack the packet itself:
   a vague goal ("make it better"), bundled tasks that should be sequenced,
   an over-constrained toolchain (dictating commands instead of outcomes),
@@ -126,8 +125,8 @@ a *separate* agent — often on the other vendor. Two sides, two contracts.
 
 **When you are the caller (dispatching idea-king to another agent):**
 
-- Contrast is the point. Send the gate to a different provider family from
-  the one that wrote the plan. A reviewer that shares the planner's priors
+- Contrast is the point. Prefer a different observed provider family for high-risk independent review
+  when available; different CLI names alone do not establish this. A reviewer that shares the planner's priors
   reproduces the planner's blind spots, and a same-family review that
   returns `ship` is worth less than it looks.
 - Brief for zero context. The reviewer cannot see this conversation: state
@@ -137,8 +136,8 @@ a *separate* agent — often on the other vendor. Two sides, two contracts.
 - End the prompt with the no-edits constant below, verbatim, and back it
   with the read-only sandbox flag (`delegate-codex.sh --read-only`). Prose
   alone is a request; the flag is the guarantee.
-- Do not poll. A real adversarial pass runs 10-30+ minutes. Wait for the
-  finish signal; hurry-ups only truncate the reasoning you paid for.
+- Wait for completion without hurry-up prompts. Monitor process/command state
+  and the task deadline; quiet output alone does not justify cancellation.
 
 **When you are the reviewer (running as the delegated agent):**
 

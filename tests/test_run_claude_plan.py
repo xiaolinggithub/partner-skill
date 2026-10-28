@@ -841,11 +841,17 @@ class RunClaudePlanTests(unittest.TestCase):
         self.assertIn("refusing to overwrite", metadata["failure_detail"])
         self.assertIsNone(metadata["plan_path"])
 
+    def test_explicit_route_mapping_accepts_only_expected_returned_model(self):
+        result = self.run_cli("--expected-model", "claude-sonnet-5", mode="wrong_model")
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertEqual("claude-sonnet-5", self.metadata()["expected_model"])
+        self.assertEqual("unknown", self.metadata()["billing_source"])
+
     def test_success_requires_exact_observed_model_and_session(self) -> None:
         wrong_model = self.run_cli(mode="wrong_model")
         self.assertEqual(4, wrong_model.returncode)
         self.assertEqual("protocol_error", self.metadata()["failure_kind"])
-        self.assertIn("configured model", self.metadata()["failure_detail"])
+        self.assertIn("expected returned model", self.metadata()["failure_detail"])
 
         self.repo = self.root / "wrong-session"
         self.repo.mkdir()

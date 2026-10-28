@@ -103,10 +103,12 @@ Then run the fastest relevant verification command for the project, such as a ta
 
 ## Progress Interpretation
 
-- `idle` plus no diff usually means Claude stopped before doing useful work.
+- `idle` plus no diff may be a completed investigation or already-satisfied task;
+  compare the result with the requested intent before declaring a stall.
 - `idle` plus meaningful diff means inspect and verify the changes.
 - Active session plus growing transcript means wait and poll again.
-- Active session plus no transcript/diff growth for several polls means check PTY output for prompts, permission waits, or crashes.
+- Active session plus no transcript/diff growth means inspect the command, PTY,
+  permissions and task deadline. Do not cancel a quiet build solely for silence.
 - Non-Git target plus a bounded file inventory is acceptable for local skill folders, handoff packs, or scratch prototypes.
 - Any check failure becomes a Codex implementation task unless the failure is caused by missing external credentials or user-only context.
 
@@ -147,4 +149,5 @@ Generate it with `python3 "$PARTNER_DIR/scripts/make-receipt.py"` (validates
 before emitting; `--save` persists it under `.partner/receipts/`). Validate a
 written receipt with `python3 "$PARTNER_DIR/scripts/validate-receipt.py" <file>`.
 
-Use exact token counts only when telemetry is available. Otherwise, the receipt proves the cheaper behavior by showing that the same Claude Code session was reused and no fresh `claude -p` review session was spawned.
+Use exact token counts only when telemetry is available. Otherwise, the receipt proves only the recorded behavior, not a saving: session
+reuse and fewer cold starts do not establish billing or quota consumption.
