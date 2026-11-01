@@ -64,6 +64,7 @@ always_on_host_rules = false
 | `hosts.<host>.identities.<identity>.effort` | string | per configured identity | Non-empty reasoning effort passed to the selected backend. |
 | `hosts.<host>.identities.<identity>.verified` | boolean | no | Whether a live check passed; dry-run configuration validity does not set this. This flag alone is not proof of returned model or enforced effort. |
 | `hosts.<host>.identities.<identity>.verified_at` | string | no | Verification timestamp supplied by the caller. |
+| `hosts.<host>.identities.<identity>.accept_fenced_json` | boolean | no | Opt-in for the tryout mechanical task: only boolean `true` accepts fenced-but-correct JSON as format-valid, recording `fence_accepted` in validation evidence. Missing or `false` keeps fences a format failure; other types are rejected. Setup preserves this identity policy across routing changes. Tryout-only; no effect on real delegation. |
 | `routing.always_on_host_rules` | boolean | no | Whether setup writes persistent host routing rules; default `false`. |
 
 Every configured identity requires `backend`, `model`, and `effort`. Backend is

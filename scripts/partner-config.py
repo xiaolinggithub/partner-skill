@@ -363,6 +363,8 @@ def _validate_data(
             raise ConfigValidationError(f"hosts.{host}.identities.{identity}.verified must be a boolean")
         if "verified_at" in fields and not isinstance(fields["verified_at"], str):
             raise ConfigValidationError(f"hosts.{host}.identities.{identity}.verified_at must be a string")
+        if "accept_fenced_json" in fields and not isinstance(fields["accept_fenced_json"], bool):
+            raise ConfigValidationError(f"hosts.{host}.identities.{identity}.accept_fenced_json must be a boolean")
     return data
 
 

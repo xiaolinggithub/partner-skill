@@ -220,7 +220,8 @@ def collect(path, wait_seconds, agent_results, agent_transcripts=None):
             row["process_succeeded"] = bool(succeeded)
             row["passed"] = False
             if role == "fast_worker" and "agent_message" in evidence:
-                row["validation"] = validate_fast_worker(evidence["agent_message"])
+                row["validation"] = validate_fast_worker(
+                    evidence["agent_message"], allow_fences=row.get("accept_fenced_json") is True)
                 row["passed"] = succeeded and row["validation"]["passed"]
             running |= row["state"] == "RUNNING" and row["backend"] == "codex"
         run["collected_at"] = utc_now()
@@ -242,20 +243,24 @@ def keys_are_sorted(value) -> bool:
     return True
 
 
-def validate_fast_worker(text: str) -> dict:
+def validate_fast_worker(text: str, allow_fences: bool = False) -> dict:
     result = {"passed": False, "format_valid": False, "content_valid": False,
               "keys_sorted": False, "errors": []}
     lines = text.strip().splitlines()
     fenced = len(lines) >= 3 and lines[0] in ("```", "```json") and lines[-1] == "```"
     if fenced:
-        result["errors"].append("markdown_fence")
+        # Fenced output fails by default; the role opt-in accepts it and records the fact.
+        if allow_fences:
+            result["fence_accepted"] = True
+        else:
+            result["errors"].append("markdown_fence")
         text = "\n".join(lines[1:-1])
     try:
         value = json.loads(text, object_pairs_hook=unique_object, parse_constant=reject_constant)
     except (ValueError, RecursionError) as error:
         result["errors"].append("invalid_json: " + str(error))
         return result
-    result["format_valid"] = not fenced
+    result["format_valid"] = not fenced or allow_fences
     # Dict equality alone treats true as 1; preserve JSON value types as well.
     result["content_valid"] = json.dumps(value, sort_keys=True) == json.dumps(EXPECTED_FAST, sort_keys=True)
     result["keys_sorted"] = keys_are_sorted(value)

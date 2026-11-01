@@ -117,6 +117,28 @@ class ConfigRoundTripTests(unittest.TestCase):
         self.assertLess(once.index("backend ="), once.index("model ="))
         self.assertLess(once.index("model ="), once.index("effort ="))
 
+    def test_fence_policy_is_optional_and_boolean_values_round_trip(self):
+        for value in (None, True, False):
+            with self.subTest(value=value):
+                text = document()
+                if value is not None:
+                    text = text.replace('[hosts.claude_code.identities.fast_worker]',
+                        '[hosts.claude_code.identities.fast_worker]\n'
+                        + 'accept_fenced_json = ' + str(value).lower())
+                identities = partner_config.validate_config(text, "claude_code")["hosts"]["claude_code"]["identities"]
+                updated = partner_config.update_host(text, "claude_code", identities)
+                after = partner_config.validate_config(updated, "claude_code")["hosts"]["claude_code"]["identities"]
+                self.assertIs(after["fast_worker"].get("accept_fenced_json"), value)
+
+    def test_non_boolean_fence_policy_cannot_silently_enable_acceptance(self):
+        for value in ('"false"', '"true"', '0', '1', '[false]', '[]'):
+            with self.subTest(value=value):
+                text = document().replace('[hosts.claude_code.identities.fast_worker]',
+                    '[hosts.claude_code.identities.fast_worker]\naccept_fenced_json = ' + value)
+                with self.assertRaisesRegex(partner_config.ConfigValidationError,
+                        'fast_worker.accept_fenced_json must be a boolean'):
+                    partner_config.validate_config(text, "claude_code")
+
 
 class UnsupportedSyntaxTests(unittest.TestCase):
     def assert_parse_error(self, assignment: str):

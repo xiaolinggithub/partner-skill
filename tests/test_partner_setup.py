@@ -165,6 +165,29 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(before, {path: path.read_bytes() for path in before})
         self.assertIn("UNCHANGED", output)
 
+    def test_setup_preserves_owner_fence_policy_even_when_routing_changes(self):
+        config = self.repo / ".partner" / "config.toml"
+        for value in (True, False):
+            for changed_model in (False, True):
+                with self.subTest(value=value, changed_model=changed_model):
+                    self.assertEqual(0, self.run_cli(*self.claude_args("--apply", "--no-write-agents"))[0])
+                    text = partner_setup.read_text(config)
+                    identities = partner_setup.partner_config.validate_config(text, "claude_code")["hosts"]["claude_code"]["identities"]
+                    identities["fast_worker"].update(accept_fenced_json=value,
+                        verified=True, verified_at="2026-11-01T00:00:00Z")
+                    config.write_text(partner_setup.partner_config.update_host(text, "claude_code", identities))
+                    extra = ("--role-model", "fast_worker=changed-model") if changed_model else ()
+                    before = self.snapshot()
+                    status, _, error = self.run_cli(*self.claude_args("--preview", "--no-write-agents", *extra))
+                    self.assertEqual((0, ""), (status, error))
+                    self.assertEqual(before, self.snapshot())
+                    status, _, error = self.run_cli(*self.claude_args("--apply", "--no-write-agents", *extra))
+                    self.assertEqual((0, ""), (status, error))
+                    after = partner_setup.partner_config.validate_config(partner_setup.read_text(config), "claude_code")["hosts"]["claude_code"]["identities"]["fast_worker"]
+                    self.assertIs(after.get("accept_fenced_json"), value)
+                    self.assertEqual(after["verified"], not changed_model)
+                    self.assertEqual(after.get("verified_at"), None if changed_model else "2026-11-01T00:00:00Z")
+
     def test_user_agent_is_refused_while_other_files_are_written(self):
         agent_dir = self.repo / ".claude" / "agents"
         agent_dir.mkdir(parents=True)

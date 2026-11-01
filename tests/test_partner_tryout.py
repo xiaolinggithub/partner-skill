@@ -38,16 +38,32 @@ class FastWorkerAcceptanceTests(unittest.TestCase):
         self.assertTrue(result["content_valid"])
         self.assertTrue(result["keys_sorted"])
 
+    def test_fences_require_explicit_opt_in_and_record_accepted_format(self):
+        for opening in ("```", "```json"):
+            text = opening + "\n" + SORTED + "\n```"
+            for enabled in (False, True):
+                with self.subTest(opening=opening, enabled=enabled):
+                    result = partner_tryout.validate_fast_worker(text, allow_fences=enabled)
+                    self.assertEqual(result["passed"], enabled)
+                    self.assertEqual(result["format_valid"], enabled)
+                    self.assertEqual(result.get("fence_accepted", False), enabled)
+                    self.assertEqual(result["errors"], [] if enabled else ["markdown_fence"])
+        result = partner_tryout.validate_fast_worker(SORTED, allow_fences=True)
+        self.assertTrue(result["passed"])
+        self.assertNotIn("fence_accepted", result)
+
     def test_key_order_is_checked_at_every_depth(self):
         for text in (
             '{"c":"x","a":[2,1],"b":{"a":{"c":3},"z":1}}',
             '{"a":[2,1],"b":{"z":1,"a":{"c":3}},"c":"x"}',
         ):
-            with self.subTest(text=text):
-                result = partner_tryout.validate_fast_worker(text)
-                self.assertTrue(result["content_valid"])
-                self.assertFalse(result["keys_sorted"])
-                self.assertFalse(result["passed"])
+            for enabled in (False, True):
+                with self.subTest(text=text, enabled=enabled):
+                    candidate = "```json\n" + text + "\n```" if enabled else text
+                    result = partner_tryout.validate_fast_worker(candidate, allow_fences=enabled)
+                    self.assertTrue(result["content_valid"])
+                    self.assertFalse(result["keys_sorted"])
+                    self.assertFalse(result["passed"])
 
     def test_content_comparison_preserves_types_and_array_order(self):
         for text in (
@@ -57,10 +73,12 @@ class FastWorkerAcceptanceTests(unittest.TestCase):
             SORTED.replace('"c":"x"', '"c":"y"'),
             '[]', 'null',
         ):
-            with self.subTest(text=text):
-                result = partner_tryout.validate_fast_worker(text)
-                self.assertFalse(result["content_valid"])
-                self.assertFalse(result["passed"])
+            for enabled in (False, True):
+                with self.subTest(text=text, enabled=enabled):
+                    candidate = "```json\n" + text + "\n```" if enabled else text
+                    result = partner_tryout.validate_fast_worker(candidate, allow_fences=enabled)
+                    self.assertFalse(result["content_valid"])
+                    self.assertFalse(result["passed"])
 
     def test_duplicate_keys_nonfinite_numbers_and_extra_text_are_invalid(self):
         for text in (
@@ -70,10 +88,12 @@ class FastWorkerAcceptanceTests(unittest.TestCase):
             SORTED.replace('"z":1', '"z":Infinity'),
             'Result: ' + SORTED, SORTED + '\nDone.', '',
         ):
-            with self.subTest(text=text):
-                result = partner_tryout.validate_fast_worker(text)
-                self.assertFalse(result["format_valid"])
-                self.assertFalse(result["passed"])
+            for enabled in (False, True):
+                with self.subTest(text=text, enabled=enabled):
+                    candidate = "```json\n" + text + "\n```" if enabled else text
+                    result = partner_tryout.validate_fast_worker(candidate, allow_fences=enabled)
+                    self.assertFalse(result["format_valid"])
+                    self.assertFalse(result["passed"])
 
 
 class TryoutWorkflowTests(unittest.TestCase):
@@ -151,6 +171,32 @@ class TryoutWorkflowTests(unittest.TestCase):
             run = partner_tryout.collect(path, 0, {"deep_reasoner": evidence})
         self.assertEqual(run["roles"]["deep_reasoner"]["state"], "RUNNING")
         self.assertIsNone(run["roles"]["deep_reasoner"]["evidence"]["execution"]["elapsed_seconds"])
+
+    def test_collect_uses_snapshotted_fence_policy_and_only_true_opts_in(self):
+        evidence = {"agent_message": "```json\n" + SORTED + "\n```",
+            "completed": True, "source": "native Agent result",
+            "execution": {"returncode": 0}}
+        native = self.repo / "native.json"
+        native.write_text(json.dumps(evidence))
+        for backend in ("codex", "claude"):
+            for value in (None, False, True, "false", 1, [False]):
+                with self.subTest(backend=backend, value=value):
+                    identity = self.identities["fast_worker"]
+                    identity["backend"] = backend
+                    identity.pop("accept_fenced_json", None)
+                    if value is not None:
+                        identity["accept_fenced_json"] = value
+                    path, run = self.start()
+                    self.assertEqual(run["roles"]["fast_worker"].get("accept_fenced_json"), value)
+                    identity["accept_fenced_json"] = value is not True
+                    def delegate(args, **kwargs):
+                        return "state: DONE\n" if args[0] == "status" else json.dumps(evidence)
+                    with patch.object(partner_tryout, "delegate", side_effect=delegate):
+                        run = partner_tryout.collect(path, 0, {"fast_worker": native} if backend == "claude" else {})
+                    row = run["roles"]["fast_worker"]
+                    self.assertEqual(row["passed"], value is True)
+                    self.assertEqual(row["validation"].get("fence_accepted", False), value is True)
+                    self.assertEqual(row["evidence"]["agent_message"], evidence["agent_message"])
 
     def native_rows(self):
         return [

@@ -315,13 +315,16 @@ def choose_identities(
     validate_backend_efforts(identities)
     return identities, sources, notes
 
-def preserve_verification(
+def preserve_identity_state(
     current: Mapping[str, Mapping[str, Any]],
     desired: Dict[str, Dict[str, Any]],
 ) -> None:
     for identity in IDENTITIES:
         before = current.get(identity, {})
         after = desired[identity]
+        # Owner acceptance policy survives routing changes; verification does not.
+        if "accept_fenced_json" in before:
+            after["accept_fenced_json"] = before["accept_fenced_json"]
         if all(before.get(field) == after[field] for field in ("backend", "model", "effort")):
             if isinstance(before.get("verified"), bool):
                 after["verified"] = before["verified"]
@@ -555,7 +558,7 @@ def build_plan(args: argparse.Namespace, env: Mapping[str, str]) -> Plan:
         if old_config:
             parsed = partner_config.validate_config(old_config, args.host, path=path)
             current_identities = parsed["hosts"][args.host]["identities"]
-        preserve_verification(current_identities, desired)
+        preserve_identity_state(current_identities, desired)
         new_config = partner_config.update_host(old_config, args.host, desired, path=path)
         # A newly created base document has one transitional separator; converge it
         # before the first write so the next identical apply is byte-idempotent.

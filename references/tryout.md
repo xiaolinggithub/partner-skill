@@ -25,7 +25,11 @@ subagent for `backend=claude`,
    `{"b":{"z":1,"a":{"c":3}},"a":[2,1],"c":"x"}`"
    Pass = returns exactly the correctly sorted, valid JSON, nothing else.
    Parse and check keys programmatically; Markdown fences are a format failure,
-   distinct from connection failure. Do not change the standard between runs.
+   distinct from connection failure — unless the role's config sets the
+   opt-in `accept_fenced_json = true`, in which case fenced-but-correct JSON
+   passes and validation evidence records `fence_accepted: true`. Do not change
+   the standard (or flip that flag) between runs to rescue a failing run;
+   it is a durable owner policy, decided before the run.
 2. **deep_reasoner — reasoning**: "A CLI tool stores per-project config. A
    is one dotfile per project in the repo (committed); B is one central
    file in the user's home keyed by project path. Name the decisive
