@@ -88,17 +88,25 @@ def delegate(args, output=None):
     return stdout
 
 
-def start(repo, host, selected):
+def start(repo, host, selected, expected_models=None):
     repo = repo.resolve()
+    if '.partner' in repo.parts or not repo.is_dir():
+        raise ValueError('--repo must be the working project directory, not .partner or a directory inside it')
     source, roles = resolve_roles(repo, host, selected)
+    expected_models = expected_models or {}
+    if set(expected_models) - set(roles) or any(
+            not isinstance(model, str) or not model.strip() for model in expected_models.values()):
+        raise ValueError('expected-model must name a selected role and a non-empty model')
     root = repo / ".partner" / "receipts"
     root.mkdir(parents=True, exist_ok=True)
     folder = Path(tempfile.mkdtemp(prefix="tryout-", dir=root))
     path = folder / "run.json"
     run = {"host": host, "repo": str(repo), "config_source": source,
            "started_at": utc_now(), "roles": roles}
-    for row in roles.values():
+    for role, row in roles.items():
         row["state"] = "pending"
+        row['routing_policy'] = ({'mode': 'exact_model', 'expected_model': expected_models[role]}
+                                 if role in expected_models else {'mode': 'follow_current'})
     save(path, run)
     for role, row in roles.items():
         prompt = task_prompt(role)
@@ -272,6 +280,42 @@ def validate_fast_worker(text: str, allow_fences: bool = False) -> dict:
     return result
 
 
+def routing_result(row, unchanged, decision):
+    policy = row.get('routing_policy')
+    if 'routing_policy' not in row:
+        return decision.get('routing_established') is True and unchanged, 'legacy_manual'
+    if not isinstance(policy, dict):
+        return False, 'unknown_routing_policy'
+    if not unchanged:
+        return False, 'partner_config_changed'
+    evidence = row.get('evidence', {})
+    rc = evidence.get('execution', {}).get('returncode')
+    dispatched = (bool(row.get('job_id')) if row['backend'] == 'codex' else
+                  bool(row.get('native_agent')) and evidence.get('completed') is True
+                  and bool(evidence.get('source')))
+    if not dispatched or row.get('state') != 'DONE' or type(rc) is not int or rc != 0:
+        return False, 'execution_unconfirmed'
+    if policy.get('mode') == 'follow_current':
+        return True, 'follow_current'
+    if policy.get('mode') == 'exact_model':
+        expected = policy.get('expected_model')
+        observed = evidence.get('observed_models', [])
+        matched = (isinstance(expected, str) and bool(expected.strip())
+                   and isinstance(observed, list) and expected in observed)
+        return matched, 'expected_model_observed' if matched else 'expected_model_unobserved'
+    return False, 'unknown_routing_policy'
+
+
+def run_summary(run):
+    return {
+        'checks': '; '.join(f"{role}={'PASS' if row['passed'] else 'FAIL/PENDING'}"
+                           for role, row in run['roles'].items()),
+        'anomalies': '; '.join(f"{role}: verification_write={row['verification_write']}"
+                              for role, row in run['roles'].items()
+                              if row['verification_write'] != 'confirmed') or 'none',
+    }
+
+
 def finalize(path, decisions):
     run = json.loads(path.read_text())
     if not isinstance(decisions, dict) or set(decisions) - set(run['roles']):
@@ -303,7 +347,8 @@ def finalize(path, decisions):
         live = current.get(role, {})
         unchanged = all(live.get(key) == row.get(key) for key in ('backend', 'model', 'effort', 'scope'))
         row['routing_unchanged'] = unchanged
-        eligible = row['passed'] and decision.get('routing_established') is True and unchanged
+        row['routing_established'], row['routing_reason'] = routing_result(row, unchanged, decision)
+        eligible = row['passed'] and row['routing_established'] and unchanged
         if eligible:
             try:
                 stamp = datetime.fromisoformat(live.get('verified_at', '').replace('Z', '+00:00'))
@@ -323,6 +368,18 @@ def finalize(path, decisions):
     run['finalized_at'] = utc_now()
     run['elapsed_seconds'] = (datetime.fromisoformat(run['finalized_at']) -
                               datetime.fromisoformat(run['started_at'])).total_seconds()
+    run['summary'] = run_summary(run)
+    lines = ['[Partner tryout report]']
+    for role, row in run['roles'].items():
+        evidence = row.get('evidence', {})
+        elapsed = evidence.get('execution', {}).get('elapsed_seconds')
+        lines.append(f"{role}: {'PASS' if row['passed'] else 'FAIL/PENDING'}; "
+                     f"backend={row['backend']}; effort={row['effort']}; "
+                     f"requested={row['model']}; observed={evidence.get('observed_models') or 'unknown'}; "
+                     f"elapsed={elapsed if elapsed is not None else 'unknown'}; "
+                     f"route={row['routing_reason']}; verification={row['verification_write']}")
+    lines.append('anomalies: ' + run['summary']['anomalies'])
+    run['report'] = '\n'.join(lines)
     save(path, run)
     return run
 
@@ -331,15 +388,11 @@ def make_receipt(path, run, args):
     used = [{'role': role, 'host': run['host'], 'model': row['model'],
              'effort': row['effort'], 'verified': row['verified_this_run']}
             for role, row in run['roles'].items() if row.get('job_id') or row.get('evidence')]
-    checks = '; '.join(f"{role}={'PASS' if row['passed'] else 'FAIL/PENDING'}"
-                       for role, row in run['roles'].items())
-    anomalies = '; '.join(f"{role}: verification_write={row['verification_write']}"
-                          for role, row in run['roles'].items()
-                          if row['verification_write'] != 'confirmed') or 'none'
+    summary = run_summary(run)
     command = [sys.executable, str(SCRIPT_DIR / 'make-receipt.py'), '--phase', 'review',
         '--claude-session', args.claude_session, '--reused', 'n/a',
-        '--new-claude-p', args.new_claude_p, '--codex-passes', '0', '--checks', checks,
-        '--anomalies', anomalies, '--host', run['host'], '--config-source', run['config_source'],
+        '--new-claude-p', args.new_claude_p, '--codex-passes', '0', '--checks', summary['checks'],
+        '--anomalies', summary['anomalies'], '--host', run['host'], '--config-source', run['config_source'],
         '--direction', 'claude-driven' if run['host'] == 'claude_code' else 'codex-driven',
         '--codex-jobs', str(sum(bool(row.get('job_id')) for row in run['roles'].values())),
         '--roles-used', json.dumps(used), '--repo', run['repo'], '--save']
@@ -360,6 +413,8 @@ def main():
     begin.add_argument('--host', choices=config.HOSTS, required=True)
     begin.add_argument('--repo', type=Path, required=True)
     begin.add_argument('--role', choices=ROLES)
+    begin.add_argument('--expected-model', action='append', default=[], metavar='ROLE=MODEL',
+                       help='Require an observed model for this role; otherwise follow the current route.')
     gather = sub.add_parser('collect', help='Observe an existing run; never retry or resubmit.')
     gather.add_argument('run', type=Path)
     gather.add_argument('--wait-seconds', type=int, default=0)
@@ -374,7 +429,10 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == 'start':
-            path, run = start(args.repo, args.host, args.role)
+            expected = [value.split('=', 1) for value in args.expected_model]
+            if any(len(entry) != 2 for entry in expected) or len(dict(expected)) != len(expected):
+                raise ValueError('expected-model must contain distinct ROLE=MODEL entries')
+            path, run = start(args.repo, args.host, args.role, dict(expected))
         elif args.command == 'collect':
             path = args.run
             entries = [value.split('=', 1) for value in args.agent_result]

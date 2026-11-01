@@ -107,7 +107,7 @@ class TryoutWorkflowTests(unittest.TestCase):
             "arbiter": {"backend": "codex", "model": "test-arbiter", "effort": "high"},
         }
 
-    def start(self, fail=False):
+    def start(self, fail=False, expected_models=None):
         def delegate(args, **kwargs):
             self.assertEqual(args[0], "submit")
             self.assertIn("--read-only", args)
@@ -121,7 +121,7 @@ class TryoutWorkflowTests(unittest.TestCase):
         with patch.object(partner_tryout, "resolve_roles", return_value=("global", {
             role: {**value, "scope": "global"} for role, value in self.identities.items()
         })), patch.object(partner_tryout, "delegate", side_effect=delegate):
-            return partner_tryout.start(self.repo, "claude_code", None)
+            return partner_tryout.start(self.repo, "claude_code", None, expected_models)
 
     def test_fixed_tasks_use_config_and_start_independent_jobs_without_waiting(self):
         path, run = self.start()
@@ -305,6 +305,7 @@ class TryoutWorkflowTests(unittest.TestCase):
     def test_finalize_keeps_strict_failure_and_reports_pending_or_denied_writes(self):
         path, run = self.start()
         for role, row in run["roles"].items():
+            row.pop('routing_policy')  # Legacy receipts keep their original manual routing contract.
             row.update(state="DONE", process_succeeded=True, passed=False,
                 verified=True, verified_at="2020-01-01T00:00:00Z",
                 evidence={"agent_message": "A. It travels with the repo."})
@@ -340,7 +341,8 @@ class TryoutWorkflowTests(unittest.TestCase):
     def test_authorized_route_mapping_can_verify_without_matching_request_alias(self):
         path, run = self.start()
         run["roles"]["deep_reasoner"].update(state="DONE", process_succeeded=True,
-            evidence={"observed_models": ["glm-5.3-flash"]})
+            evidence={"observed_models": ["glm-5.3-flash"], "completed": True,
+                      "source": "native result", "execution": {"returncode": 0}})
         partner_tryout.save(path, run)
         for established in (False, True):
             with self.subTest(established=established):
@@ -351,10 +353,113 @@ class TryoutWorkflowTests(unittest.TestCase):
                     report = partner_tryout.finalize(path, decisions)
                 row = report["roles"]["deep_reasoner"]
                 self.assertTrue(row["passed"])
-                self.assertEqual("verification_command" in row, established)
+                self.assertIn("verification_command", row)
+                self.assertTrue(row['routing_established'])
                 self.assertFalse(row["verified_this_run"])
                 self.assertEqual(row["model"], "opus")
                 self.assertEqual(row["evidence"]["observed_models"], ["glm-5.3-flash"])
+
+    def test_start_rejects_partner_storage_before_config_or_dispatch(self):
+        for repo in (self.repo / '.partner', self.repo / '.partner' / 'receipts'):
+            with self.subTest(repo=repo), patch.object(partner_tryout, 'resolve_roles') as resolve:
+                with self.assertRaisesRegex(ValueError, 'working project directory'):
+                    partner_tryout.start(repo, 'claude_code', None)
+                resolve.assert_not_called()
+                self.assertFalse(repo.exists())
+
+    def test_invalid_model_requirements_fail_before_dispatch(self):
+        for expected in ({'unknown': 'opus'}, {'deep_reasoner': ''}):
+            with self.subTest(expected=expected), patch.object(partner_tryout, 'resolve_roles',
+                    return_value=('global', self.identities)), patch.object(partner_tryout, 'delegate') as dispatch:
+                with self.assertRaisesRegex(ValueError, 'selected role'):
+                    partner_tryout.start(self.repo, 'claude_code', None, expected)
+                dispatch.assert_not_called()
+                self.assertFalse((self.repo / '.partner').exists())
+
+    def test_collected_route_policy_controls_verification_and_report(self):
+        for expected, observed, completed, allowed in (
+                (None, ['glm-5.3-flash'], True, True),
+                (None, ['claude-opus'], True, True),
+                (None, [], True, True),
+                ('claude-opus', ['glm-5.3-flash'], True, False),
+                ('claude-opus', [], True, False),
+                ('claude-opus', ['claude-opus'], True, True),
+                (None, ['glm-5.3-flash'], False, False)):
+            with self.subTest(expected=expected, observed=observed, completed=completed):
+                path, initial = self.start(expected_models={'deep_reasoner': expected} if expected else None)
+                native = self.repo / 'route-result.json'
+                native.write_text(json.dumps({'completed': completed, 'source': 'native result',
+                    'agent_message': 'A. It travels with the repo.', 'observed_models': observed,
+                    'execution': {'returncode': 0 if completed else None}}))
+                with patch.object(partner_tryout, 'delegate', return_value='state: RUNNING\n'):
+                    partner_tryout.collect(path, 0, {'deep_reasoner': native})
+                # Reproduce the wrong manual verdict from the live conversation, in both directions.
+                decisions = {'deep_reasoner': {'accepted': True, 'reason': 'A travels on rename',
+                    'routing_established': not allowed}}
+                with patch.object(partner_tryout, 'resolve_roles', return_value=('global', initial['roles'])):
+                    result = partner_tryout.finalize(path, decisions)
+                row = result['roles']['deep_reasoner']
+                self.assertEqual(row['routing_established'], allowed)
+                self.assertEqual('verification_command' in row, allowed)
+                self.assertEqual(row['evidence']['observed_models'], observed)
+                self.assertFalse(row['verified_this_run'])
+                self.assertIn('deep_reasoner: verification_write=', result['summary']['anomalies'])
+                args = SimpleNamespace(claude_session='none', new_claude_p='unknown', monitoring_level='none')
+                receipt = Path(partner_tryout.make_receipt(path, result, args)).read_text()
+                self.assertIn('anomalies: ' + result['summary']['anomalies'], receipt)
+                self.assertIn('anomalies: ' + result['summary']['anomalies'], result['report'])
+                if allowed:
+                    initial['roles']['deep_reasoner'].update(verified=True, verified_at=partner_tryout.utc_now())
+                    with patch.object(partner_tryout, 'resolve_roles', return_value=('global', initial['roles'])):
+                        confirmed = partner_tryout.finalize(path, decisions)
+                    self.assertTrue(confirmed['roles']['deep_reasoner']['verified_this_run'])
+                    self.assertNotIn('deep_reasoner:', confirmed['summary']['anomalies'])
+
+    def test_route_cannot_verify_without_dispatch_or_after_config_change(self):
+        for variant in ('no_dispatch', 'changed_config', 'unknown_policy'):
+            with self.subTest(variant=variant):
+                path, run = self.start()
+                row = run['roles']['deep_reasoner']
+                row.update(state='DONE', process_succeeded=True, evidence={'completed': True,
+                    'source': 'native result', 'execution': {'returncode': 0}})
+                current = {role: dict(value) for role, value in run['roles'].items()}
+                if variant == 'no_dispatch':
+                    row.pop('native_agent')
+                elif variant == 'changed_config':
+                    current['deep_reasoner']['model'] = 'changed'
+                else:
+                    row['routing_policy'] = {'mode': 'typo'}
+                partner_tryout.save(path, run)
+                with patch.object(partner_tryout, 'resolve_roles', return_value=('global', current)):
+                    result = partner_tryout.finalize(path, {'deep_reasoner': {
+                        'accepted': True, 'reason': 'valid answer', 'routing_established': True}})
+                self.assertFalse(result['roles']['deep_reasoner']['routing_established'])
+                self.assertNotIn('verification_command', result['roles']['deep_reasoner'])
+
+    def test_codex_completion_uses_same_policy_and_unknown_model_stays_unknown(self):
+        for expected in (None, 'required-model'):
+            with self.subTest(expected=expected):
+                path, initial = self.start(expected_models={'arbiter': expected} if expected else None)
+                evidence = {'agent_message': 'A. It travels with the repo.',
+                            'observed_models': [], 'execution': {'returncode': 0}}
+                with patch.object(partner_tryout, 'delegate', side_effect=lambda args, **kw:
+                        'state: DONE\n' if args[0] == 'status' else json.dumps(evidence)):
+                    partner_tryout.collect(path, 0, {})
+                with patch.object(partner_tryout, 'resolve_roles', return_value=('global', initial['roles'])):
+                    result = partner_tryout.finalize(path, {'arbiter': {
+                        'accepted': True, 'reason': 'Independent answer addresses moved directories'}})
+                row = result['roles']['arbiter']
+                self.assertEqual(row['routing_established'], expected is None)
+                self.assertEqual('verification_command' in row, expected is None)
+                self.assertIn('observed=unknown', result['report'])
+
+    def test_invalid_policy_cannot_fall_back_to_legacy_manual_verdict(self):
+        for policy in (None, 'follow_current', {'mode': 'exact_model', 'expected_model': ''}):
+            with self.subTest(policy=policy):
+                row = {'routing_policy': policy, 'backend': 'codex', 'job_id': 'job-test',
+                       'state': 'DONE', 'evidence': {'execution': {'returncode': 0}}}
+                established, _ = partner_tryout.routing_result(row, True, {'routing_established': True})
+                self.assertFalse(established)
 
     def test_interrupted_submission_can_collect_without_resubmitting_other_roles(self):
         path, run = self.start()

@@ -70,7 +70,7 @@ freely mixed across vendors. Their values live only in
 (global) — schema in `docs/config-schema.md`; never duplicate them into
 prompts or docs. On "搭子，试跑", run the identity tryout in
 `references/tryout.md`: each identity executes one micro-task and the
-report distinguishes requested and observed models, actual elapsed time, and output validity. Use `scripts/partner-tryout.py start/collect/finalize` for the fixed orchestration and strict validator; the driver still judges reasoning and route evidence. A dry-run configuration check is not a live verification.
+report distinguishes requested and observed models, actual elapsed time, and output validity. Use `scripts/partner-tryout.py start/collect/finalize` for fixed orchestration, content validation and routing-policy checks; the driver judges reasoning content. Pass the working project directory as `--repo`, never its `.partner` storage directory. Deliver finalize's generated `report` and keep its anomaly status intact. A dry-run configuration check is not a live verification.
 
 ## Tool Location
 
@@ -99,7 +99,8 @@ files; update both when changing their shared rules.
   between official Claude and other providers. A requested alias differing from
   an observed model is not itself a failure. Never pin a provider from an old run.
 - When the user requires a particular returned model, check that requirement;
-  pass `--expected-model` to the bounded planner. Missing or mismatched evidence
+  pass `--expected-model` to the bounded planner, or `start --expected-model
+  ROLE=MODEL` to tryout before dispatch. Missing or mismatched evidence
   cannot satisfy an explicit model requirement. Keep unavailable observations
   unknown; never relabel an observed model.
 - For helper-launched Claude children following an authorized current route, use

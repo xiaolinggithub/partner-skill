@@ -9,7 +9,7 @@ independent micro-tasks concurrently; avoid full-repo discovery.
 not promote those roles to `verified`. Claude smoke obtains a minimal live
 response; this alone does not prove the returned model or enforced effort.
 For tryout, capture requested/observed model and report missing observations as
-`unknown`. Intentional routing mappings are valid when declared; never infer
+`unknown`. The selected routing policy is saved at start; never infer
 actual provider from the CLI or a role name in the prompt.
 
 Follow the user's selected CLI/CC Switch route unless they require a specific
@@ -67,6 +67,15 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
    the host's Claude subagent mechanism immediately, while Codex jobs run.
    Never replace a Claude packet with a Codex subagent. If the current host
    cannot launch the configured Claude channel, report the unsupported route.
+   `$REPO` is the working project directory (or the current working directory
+   for a non-project tryout), not its `.partner` storage directory. The helper
+   rejects `.partner` and paths inside it before dispatch; do not change cwd to
+   `.partner` to organize output. It appends `.partner/receipts` itself.
+   New runs snapshot `routing_policy.mode=follow_current` per role by default.
+   Only when the user requires a specific returned model, add repeatable
+   `--expected-model ROLE=MODEL` at start, e.g. `--expected-model deep_reasoner=claude-opus`.
+   This snapshots `exact_model` with that expected model. Never change a run's
+   policy or expected model during collection/finalization to rescue a result.
 2. After a native Agent returns, pass its actual transcript path directly to
    collect using `--agent-transcript deep_reasoner=<native.jsonl>`. The helper
    checks the exact task, extracts assistant response models (not request model
@@ -89,20 +98,22 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
    IDs and submission output; inspect them before deliberately starting a new run.
 4. Inspect both reasoning answers against the original criteria; record judgments
    as a JSON object keyed by role. Example entry:
-   `"arbiter":{"accepted":true,"reason":"A travels on rename; independent answer agrees","routing_established":false,"verification_write":"pending"}`.
-   Include fast_worker routing judgment too, but its acceptance is always computed
-   from raw output. Routing is established only from observed/configured evidence
-   or an explicitly declared mapping; do not infer it from a successful answer.
-   With an authorized follow-current-route policy, establish routing from dispatch
-   through the configured channel under that policy, not model-name equality.
-   Record that basis in `reason`; do not set it true solely because content passed.
-   If the user requires a specific returned model, missing or mismatched model
-   evidence keeps `routing_established=false` even when content passes.
+   `"arbiter":{"accepted":true,"reason":"A travels on rename; independent answer agrees","verification_write":"pending"}`.
+   The driver judges reasoning content and independent agreement; fast_worker
+   content acceptance is always computed from raw output. For new runs the helper
+   computes `routing_established` and `routing_reason` from the saved policy,
+   dispatch/completion evidence and unchanged Partner config. `follow_current`
+   does not require model-name equality; `exact_model` also requires the expected
+   model in observed evidence. A model-written `routing_established` input is
+   ignored for new runs and cannot veto or override the policy check.
+   Legacy runs without a policy retain the original manual routing contract;
+   do not backfill a policy into old evidence. Start a new run for the new rules.
    Run `python3 "$PARTNER_DIR/scripts/partner-tryout.py" finalize <run.json> --judgments <judgments.json>`.
    The flags below are the complete optional receipt inputs; no help/source
    discovery is needed. Write the judgments and finalize in one tool call when
    the host supports it, then give the concise fixed report from the returned data.
-   It saves the fixed receipt and returns per-role results, old verification
+   It saves the fixed receipt and returns a generated `report`, shared `summary`,
+   per-role results, old verification
    metadata, current verification, actual execution evidence and total run timing.
    Pass known `--claude-session`, `--new-claude-p` (from session-snapshot diff) and
    `--monitoring-level` evidence; absent session count remains unknown.
@@ -124,22 +135,19 @@ measured end-to-end speed improvement.
 
 ## The tryout report (fixed format)
 
-```text
-[Partner tryout report]
-identity       backend  model         effort  elapsed  result
-fast_worker    codex    gpt-5.6-sol   medium  28s      PASS
-deep_reasoner  claude   opus          high    1m42s    PASS
-arbiter        codex    gpt-5.6-sol   xhigh   2m10s    PASS (agrees with deep_reasoner: B)
-verdict: all identities live
-```
+Deliver the helper's `report` from the final finalize call after verification
+writeback. It includes content result, backend/effort, requested/observed models,
+elapsed seconds, route reason, verification state and anomalies. Its anomaly
+line and the receipt use the same `summary`; do not replace pending, denied or
+ineligible verification with "no anomalies". Add independent-answer agreement
+or divergence below the generated report without rewriting its status fields.
 
 - `elapsed` is each job's actual start-to-finish duration, not time from a shared
   launch marker to result collection. Never use an unrelated file mtime. If no
   valid timing evidence exists, report `unknown`.
 - The table's model is the request. Append observed model and effort evidence
   separately; advisory effort is not an enforced parameter.
-- `result` for the arbiter row states agreement or names the divergence in
-  a few words. A divergence is not a failure.
+- Explain arbiter agreement or divergence in a few words. A divergence is not a failure.
 - A failed row states the actual error (CLI missing, model rejected,
   timeout) and the fix pointer — rerun `搭子，配置` or install the missing
   CLI. `verdict` then lists which identities are live and which are not;
