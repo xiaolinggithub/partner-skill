@@ -42,6 +42,8 @@ bash install.sh --target codex
 bash install.sh --target claude
 ```
 
+Directory upgrades preserve symlinks, skip source and duplicate targets, and stage and validate before replacement. A failed replacement restores that directory. Local edits stay in backups; the latest three backups are retained after success. `--target all` works per directory and does not roll back other targets that already succeeded.
+
 Before first real use, say "搭子，配置" (Partner, configure). Partner opens a local single-page UI bound only to `127.0.0.1`: balanced/quality/cost starting points plus every identity's concrete CLI/model/effort are handled in one place. The beginner flow fixes project scope, local Git exclusion, and post-install checks to safe defaults instead of asking advanced questions. The page shows the exact diff before confirmation. Codex models and per-model efforts come from the local CLI `model/list`; Claude aliases and efforts come from `claude --help`. Neither side is guessed.
 
 <div align="center">

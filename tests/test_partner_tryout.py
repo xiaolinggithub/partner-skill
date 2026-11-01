@@ -325,7 +325,49 @@ class TryoutWorkflowTests(unittest.TestCase):
         self.assertTrue(report["roles"]["deep_reasoner"]["passed"])
         self.assertFalse(report["roles"]["deep_reasoner"]["verified_this_run"])
         self.assertEqual(report["roles"]["deep_reasoner"]["verification_write"], "denied")
-        self.assertIn("--scope global", report["roles"]["deep_reasoner"]["verification_command"])
+        self.assertNotIn("verification_command", report["roles"]["deep_reasoner"])
+
+    def test_denial_clears_stale_commands_and_survives_later_finalize(self):
+        for scope in ('project', 'global'):
+            with self.subTest(scope=scope):
+                path, run = self.start()
+                for row in run['roles'].values():
+                    row.update(scope=scope, state='DONE', process_succeeded=True,
+                        validation={'passed': True}, evidence={'completed': True,
+                        'source': 'native result', 'execution': {'returncode': 0}})
+                partner_tryout.save(path, run)
+                decisions = {role: {'accepted': True, 'reason': 'Meets the task'}
+                             for role in run['roles']}
+                with patch.object(partner_tryout, 'resolve_roles', return_value=(scope, run['roles'])):
+                    pending = partner_tryout.finalize(path, decisions)
+                    for row in pending['roles'].values():
+                        self.assertIn('--scope ' + scope, row['verification_command'])
+                    denied = {role: {**value, 'verification_write': 'denied'}
+                              for role, value in decisions.items()}
+                    partner_tryout.finalize(path, denied)
+                    result = partner_tryout.finalize(path, decisions)
+                for row in result['roles'].values():
+                    self.assertTrue(row['passed'])
+                    self.assertEqual(row['verification_write'], 'denied')
+                    self.assertNotIn('verification_command', row)
+                    self.assertFalse(row['verified_this_run'])
+                self.assertEqual(json.loads(path.read_text()), result)
+
+    def test_denial_is_not_replaced_by_confirmation_or_content_failure(self):
+        path, run = self.start()
+        for row in run['roles'].values():
+            row.update(state='DONE', process_succeeded=True, validation={'passed': True},
+                verified=True, verified_at=partner_tryout.utc_now(),
+                evidence={'completed': True, 'source': 'native result', 'execution': {'returncode': 0}})
+        partner_tryout.save(path, run)
+        decisions = {role: {'accepted': role != 'arbiter', 'reason': 'Content reviewed',
+                           'verification_write': 'denied'} for role in run['roles']}
+        with patch.object(partner_tryout, 'resolve_roles', return_value=('global', run['roles'])):
+            result = partner_tryout.finalize(path, decisions)
+        for row in result['roles'].values():
+            self.assertEqual(row['verification_write'], 'denied')
+            self.assertNotIn('verification_command', row)
+            self.assertFalse(row['verified_this_run'])
 
     def test_absent_judgment_or_changed_route_never_marks_verified(self):
         path, run = self.start()

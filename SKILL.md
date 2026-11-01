@@ -81,9 +81,10 @@ The helper scripts referenced below live in this skill's install directory (the 
 This installation may be shared through symlinks. Inspect `ls -ld`, `readlink`,
 and `git remote -v` before updating it; an installation lock's source URL does
 not prove that `.git` exists or that local edits are safe from an updater.
-Do not run `install.sh --target all` from a directory that is also an install
-target: moving the target away can invalidate the source. Use an isolated
-checkout for development, retain a backup, and preserve existing symlinks.
+`install.sh` resolves real targets, skips the source itself and duplicate targets,
+and stages directory upgrades before replacement while preserving symlinks.
+Use an isolated checkout for development; local edits remain in the upgrade
+backup, not the new payload. Recovery is per directory, not an all-target rollback.
 `idea-king/SKILL.md` and `idea-king/codex-prompt.md` are separate instruction
 files; update both when changing their shared rules.
 

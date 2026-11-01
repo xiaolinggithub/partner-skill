@@ -42,6 +42,8 @@ bash install.sh --target codex
 bash install.sh --target claude
 ```
 
+目录升级会保留符号链接、跳过同源及重复目标，先暂存校验再替换；失败时恢复该目录。旧目录中的本地修改留在备份中，成功后保留最近 3 份备份。`--target all` 按目录处理，不会回滚已经成功的其他目标。
+
 装完第一次用之前，说一句「搭子，配置」：搭子会打开只监听 `127.0.0.1` 的本地单页 UI。均衡/质量/成本三个起点和三个身份的具体 CLI/模型/effort 都在一页完成；页面先展示精确 diff，确认后才落盘。小白流程固定使用当前项目、本机 Git 忽略、安装后自动检查等安全默认值，不再追问高级选项。Codex 模型和每个模型支持的 effort 来自本机 CLI `model/list`，Claude 别名与 effort 来自 `claude --help`，绝不瞎猜。
 
 <div align="center">

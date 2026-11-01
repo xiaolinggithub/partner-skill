@@ -121,6 +121,8 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
    permissions; it includes the role's actual `--scope`. Then finalize again to
    read back the timestamp and routing. On denial, set `verification_write` to
    `denied` and finalize without retrying the write through another path.
+   Denied rows emit no update command; later finalization preserves denial when
+   the judgment omits `verification_write`.
    Prior `verified=true` does not count as verification in this run. A changed
    route suppresses the update command; resolve that change before another run.
    The helper compares Partner config fields, not external CC Switch settings.

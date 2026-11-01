@@ -342,14 +342,15 @@ def finalize(path, decisions):
         row['passed'] = bool(row.get('process_succeeded') and accepted)
         row['judgment'] = decision
         row['verified_this_run'] = False
-        row['verification_write'] = decision.get('verification_write', 'pending')
+        row['verification_write'] = decision.get('verification_write',
+            'denied' if row.get('verification_write') == 'denied' else 'pending')
         row.pop('verification_command', None)
         live = current.get(role, {})
         unchanged = all(live.get(key) == row.get(key) for key in ('backend', 'model', 'effort', 'scope'))
         row['routing_unchanged'] = unchanged
         row['routing_established'], row['routing_reason'] = routing_result(row, unchanged, decision)
         eligible = row['passed'] and row['routing_established'] and unchanged
-        if eligible:
+        if eligible and row['verification_write'] != 'denied':
             try:
                 stamp = datetime.fromisoformat(live.get('verified_at', '').replace('Z', '+00:00'))
                 row['verified_this_run'] = (live.get('verified') is True and
@@ -363,7 +364,7 @@ def finalize(path, decisions):
                     sys.executable, str(SCRIPT_DIR / 'partner-config.py'), '--host', run['host'],
                     '--repo', run['repo'], '--scope', row['scope'], 'set', '--role', role,
                     '--verified', '--verified-at', utc_now()])
-        if not row['passed']:
+        if not row['passed'] and row['verification_write'] != 'denied':
             row['verification_write'] = 'not_eligible'
     run['finalized_at'] = utc_now()
     run['elapsed_seconds'] = (datetime.fromisoformat(run['finalized_at']) -

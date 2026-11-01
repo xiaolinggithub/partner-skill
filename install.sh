@@ -72,7 +72,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 if [ ! -f "$ROOT/SKILL.md" ]; then
   echo "ERROR: install.sh must run from the partner-skill repository." >&2
   exit 1
@@ -168,59 +168,103 @@ copy_payload() {
       -print0 | tar -cf - --null -T -) \
       | tar -xf - -C "$dest"
   fi
-  write_install_meta "$dest/.install-meta" "$(host_for_dest "$dest")"
 }
 
-for dest in "${DESTS[@]}"; do
-  if [ "$ROOT" = "$dest" ]; then
-    echo "Already installed at $dest"
-    continue
+# Resolve through both leaf and parent symlinks, including not-yet-created targets.
+real_path() {
+  python3 -B -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$1"
+}
+
+INSTALLED_DESTS=("")
+install_directory() {
+  local kind="$1" dest="$2" source target previous
+  source="$ROOT"
+  [ "$kind" != "idea-king" ] || source="$ROOT/idea-king"
+  source="$(real_path "$source")"
+  target="$(real_path "$dest")"
+  if [ "$source" = "$target" ]; then
+    echo "Already installed at $dest (source is the same directory)"
+    return 0
   fi
-
-  echo "Install Partner -> $dest"
-  if [ "$DRY_RUN" = "true" ]; then
-    continue
+  for previous in "${INSTALLED_DESTS[@]}"; do
+    if [ "$previous" = "$target" ] || { [ "$kind" = "idea-king" ] && [ "$target" = "$previous/idea-king" ]; }; then
+      echo "Already updated $dest -> $target"
+      return 0
+    fi
+  done
+  if [[ "$source/" == "$target/"* || "$target/" == "$source/"* ]]; then
+    echo "ERROR: source and install target overlap: $source -> $target" >&2
+    return 1
   fi
-
-  mkdir -p "$(dirname "$dest")"
-  if [ -e "$dest" ]; then
-    backup="$dest.backup.$(date +%Y%m%d%H%M%S)"
-    echo "Existing install found. Moving it to $backup"
-    mv "$dest" "$backup"
-    ls -dt "$dest".backup.* 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" \
-      | while IFS= read -r old_backup; do
-          rm -rf "$old_backup" # risk-ok: prunes only our own timestamped backups beyond BACKUP_KEEP
-        done
+  if [ -e "$target" ] && [ ! -d "$target" ]; then
+    echo "ERROR: install target is not a directory: $target" >&2
+    return 1
   fi
-
-  mkdir -p "$dest"
-  copy_payload "$dest"
-done
-
-install_idea_king_skill() {
-  # Installs idea-king as a sibling skill directory (Claude Code and agents
-  # discover skills at <root>/<name>/SKILL.md, so it cannot stay nested
-  # inside the partner-skill copy).
-  local dest="$1"
-  echo "Install idea-king -> $dest"
+  echo "Install $kind -> $dest (real target: $target)"
   if [ "$DRY_RUN" = "true" ]; then
     return 0
   fi
-  mkdir -p "$(dirname "$dest")"
-  if [ -e "$dest" ]; then
-    local backup="$dest.backup.$(date +%Y%m%d%H%M%S)"
-    echo "Existing idea-king install found. Moving it to $backup"
-    mv "$dest" "$backup"
-    ls -dt "$dest".backup.* 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" \
-      | while IFS= read -r old_backup; do
-          rm -rf "$old_backup" # risk-ok: prunes only our own timestamped backups beyond BACKUP_KEEP
-        done
-  fi
-  mkdir -p "$dest"
-  (cd "$ROOT/idea-king" && find . -type f ! -name '.DS_Store' ! -name 'codex-prompt.md' -print0 \
-    | tar -cf - --null -T -) | tar -xf - -C "$dest"
-  write_install_meta "$dest/.install-meta" "$(host_for_dest "$dest")"
+
+  (
+    # Stage beside the real target so replacement stays on the same filesystem.
+    stage=""
+    backup=""
+    cleanup_install() {
+      local status=$?
+      trap - EXIT
+      if [ -n "$backup" ] && [ -d "$backup" ] && [ ! -e "$target" ]; then
+        if ! mv "$backup" "$target"; then
+          echo "ERROR: restore failed; old install remains at $backup" >&2
+          status=1
+        fi
+      fi
+      [ -z "$stage" ] || rm -rf "$stage" # risk-ok: only this invocation's mktemp staging directory
+      exit "$status"
+    }
+    trap cleanup_install EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    mkdir -p "$(dirname "$target")"
+    stage="$(mktemp -d "$target.stage.XXXXXX")"
+    mkdir "$stage/payload"
+    if [ "$kind" = "Partner" ]; then
+      copy_payload "$stage/payload"
+      for required in install.sh scripts/partner-config.py scripts/partner-tryout.py idea-king/SKILL.md idea-king/codex-prompt.md; do
+        if [ ! -s "$stage/payload/$required" ]; then
+          echo "ERROR: incomplete install payload: $required" >&2
+          exit 1
+        fi
+      done
+      bash -n "$stage/payload/install.sh"
+    else
+      (cd "$source" && find . -type f ! -name '.DS_Store' ! -name 'codex-prompt.md' -print0 \
+        | tar -cf - --null -T -) | tar -xf - -C "$stage/payload"
+    fi
+    if [ ! -s "$stage/payload/SKILL.md" ]; then
+      echo "ERROR: incomplete install payload: SKILL.md" >&2
+      exit 1
+    fi
+    write_install_meta "$stage/payload/.install-meta" "$(host_for_dest "$dest")"
+    if [ -e "$target" ]; then
+      backup="$target.backup.$(date +%Y%m%d%H%M%S).${stage##*.}"
+      echo "Existing install found. Moving it to $backup"
+      mv "$target" "$backup"
+    fi
+    mv "$stage/payload" "$target"
+    # Prune only after the replacement succeeds; failed upgrades keep all backups.
+    if [ -n "$backup" ]; then
+      ls -dt "$target".backup.* 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" \
+        | while IFS= read -r old_backup; do
+            rm -rf "$old_backup" # risk-ok: prunes only our own timestamped backups beyond BACKUP_KEEP
+          done
+    fi
+  )
+  INSTALLED_DESTS+=("$target")
 }
+
+for dest in "${DESTS[@]}"; do
+  install_directory Partner "$dest"
+done
 
 install_idea_king_codex_prompt() {
   local dest="$HOME/.codex/prompts/idea-king.md"
@@ -235,8 +279,8 @@ install_idea_king_codex_prompt() {
 
 for dest in "${DESTS[@]}"; do
   case "$dest" in
-    "$HOME/.claude/skills/partner-skill") install_idea_king_skill "$HOME/.claude/skills/idea-king" ;;
-    "$HOME/.agents/skills/partner-skill") install_idea_king_skill "$HOME/.agents/skills/idea-king" ;;
+    "$HOME/.claude/skills/partner-skill") install_directory idea-king "$HOME/.claude/skills/idea-king" ;;
+    "$HOME/.agents/skills/partner-skill") install_directory idea-king "$HOME/.agents/skills/idea-king" ;;
     "$HOME/.codex/skills/partner-skill") install_idea_king_codex_prompt ;;
   esac
 done
