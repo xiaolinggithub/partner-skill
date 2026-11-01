@@ -65,6 +65,10 @@ class RunClaudePlanTests(unittest.TestCase):
                     if mode == "wrong_model"
                     else "claude-fable-5"
                 )
+                if mode == "routed_model":
+                    emitted_model = "glm-5.3-flash"
+                elif mode == "no_model":
+                    emitted_model = None
                 valid_plan = (
                     "# Plan Checkpoint\\n\\n"
                     "## Goal\\nShip the bounded change.\\n"
@@ -847,8 +851,30 @@ class RunClaudePlanTests(unittest.TestCase):
         self.assertEqual("claude-sonnet-5", self.metadata()["expected_model"])
         self.assertEqual("unknown", self.metadata()["billing_source"])
 
-    def test_success_requires_exact_observed_model_and_session(self) -> None:
-        wrong_model = self.run_cli(mode="wrong_model")
+    def test_default_route_accepts_other_providers_without_changing_request(self):
+        result = self.run_cli(mode="routed_model")
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        metadata = self.metadata()
+        self.assertEqual("claude-fable-5", metadata["model"])
+        self.assertEqual(["glm-5.3-flash"], metadata["observed_models"])
+        self.assertIsNone(metadata["expected_model"])
+        arguments = json.loads(self.args_log.read_text())
+        self.assertEqual("claude-fable-5", arguments[arguments.index("--model") + 1])
+
+    def test_unobserved_model_is_allowed_only_without_explicit_requirement(self):
+        result = self.run_cli(mode="no_model")
+        self.assertEqual(0, result.returncode, result.stderr + result.stdout)
+        self.assertEqual([], self.metadata()["observed_models"])
+        self.assertIsNone(self.metadata()["expected_model"])
+        self.repo = self.root / "pinned-model"
+        self.repo.mkdir()
+        self.write_config()
+        result = self.run_cli("--expected-model", "claude-fable-5", mode="no_model")
+        self.assertEqual(4, result.returncode)
+        self.assertIn("expected returned model", self.metadata()["failure_detail"])
+
+    def test_explicit_model_requirement_and_session_mismatch_fail_closed(self) -> None:
+        wrong_model = self.run_cli("--expected-model", "claude-fable-5", mode="wrong_model")
         self.assertEqual(4, wrong_model.returncode)
         self.assertEqual("protocol_error", self.metadata()["failure_kind"])
         self.assertIn("expected returned model", self.metadata()["failure_detail"])

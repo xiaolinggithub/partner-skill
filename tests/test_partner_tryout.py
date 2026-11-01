@@ -337,6 +337,25 @@ class TryoutWorkflowTests(unittest.TestCase):
         self.assertFalse(report["roles"]["arbiter"]["verified_this_run"])
         self.assertNotIn("verification_command", report["roles"]["arbiter"])
 
+    def test_authorized_route_mapping_can_verify_without_matching_request_alias(self):
+        path, run = self.start()
+        run["roles"]["deep_reasoner"].update(state="DONE", process_succeeded=True,
+            evidence={"observed_models": ["glm-5.3-flash"]})
+        partner_tryout.save(path, run)
+        for established in (False, True):
+            with self.subTest(established=established):
+                decisions = {"deep_reasoner": {"accepted": True,
+                    "reason": "Answer meets the task; dispatched via the user-authorized CC Switch route",
+                    "routing_established": established}}
+                with patch.object(partner_tryout, "resolve_roles", return_value=("global", run["roles"])):
+                    report = partner_tryout.finalize(path, decisions)
+                row = report["roles"]["deep_reasoner"]
+                self.assertTrue(row["passed"])
+                self.assertEqual("verification_command" in row, established)
+                self.assertFalse(row["verified_this_run"])
+                self.assertEqual(row["model"], "opus")
+                self.assertEqual(row["evidence"]["observed_models"], ["glm-5.3-flash"])
+
     def test_interrupted_submission_can_collect_without_resubmitting_other_roles(self):
         path, run = self.start()
         for role, row in run["roles"].items():

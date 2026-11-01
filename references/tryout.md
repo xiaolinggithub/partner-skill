@@ -12,6 +12,12 @@ For tryout, capture requested/observed model and report missing observations as
 `unknown`. Intentional routing mappings are valid when declared; never infer
 actual provider from the CLI or a role name in the prompt.
 
+Follow the user's selected CLI/CC Switch route unless they require a specific
+returned model. Authorization to switch providers covers official Claude and
+third-party routes without declaring every model pair again. A different observed
+name alone is not a routing anomaly. Keep requested and observed models separate;
+unknown observations stay unknown and never prove a specific provider.
+
 ## The three micro-tasks
 
 Fixed content, independent of the target repo's state. Run them through
@@ -87,6 +93,11 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
    Include fast_worker routing judgment too, but its acceptance is always computed
    from raw output. Routing is established only from observed/configured evidence
    or an explicitly declared mapping; do not infer it from a successful answer.
+   With an authorized follow-current-route policy, establish routing from dispatch
+   through the configured channel under that policy, not model-name equality.
+   Record that basis in `reason`; do not set it true solely because content passed.
+   If the user requires a specific returned model, missing or mismatched model
+   evidence keeps `routing_established=false` even when content passes.
    Run `python3 "$PARTNER_DIR/scripts/partner-tryout.py" finalize <run.json> --judgments <judgments.json>`.
    The flags below are the complete optional receipt inputs; no help/source
    discovery is needed. Write the judgments and finalize in one tool call when
@@ -101,6 +112,9 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
    `denied` and finalize without retrying the write through another path.
    Prior `verified=true` does not count as verification in this run. A changed
    route suppresses the update command; resolve that change before another run.
+   The helper compares Partner config fields, not external CC Switch settings.
+   After an external switch, historical `verified=true` is not fresh verification
+   of the new route. Use a new run's evidence when making that claim.
 
 The helper stores run evidence under `.partner/receipts/tryout-*/`; the existing
 delegate tool also stores its job evidence under `.partner/jobs/`. It never

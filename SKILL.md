@@ -95,6 +95,19 @@ files; update both when changing their shared rules.
   separately; label unobserved values and billing sources `unknown`.
 - Intentional route mappings are allowed; do not silently substitute a model
   to make a task pass. Different clients alone do not prove independent models.
+- Follow the user's selected CLI/CC Switch route by default, including switches
+  between official Claude and other providers. A requested alias differing from
+  an observed model is not itself a failure. Never pin a provider from an old run.
+- When the user requires a particular returned model, check that requirement;
+  pass `--expected-model` to the bounded planner. Missing or mismatched evidence
+  cannot satisfy an explicit model requirement. Keep unavailable observations
+  unknown; never relabel an observed model.
+- For helper-launched Claude children following an authorized current route, use
+  `PARTNER_CLAUDE_ENV=inherit` to retain its provider environment. Keep parent
+  session markers stripped and credentials out of artifacts; do not edit routing
+  settings to rescue a failed task.
+- `verified` records a previous check, not proof of today's provider after an
+  external route switch. Use current run evidence for current acceptance.
 - Reuse a healthy session for repair rounds; use a bounded fresh session when
   context has become stale or independent high-risk review is needed.
 - Keep Kimi Work/Kimi Code Goal separate from Claude Code `/goal`.

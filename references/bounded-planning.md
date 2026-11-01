@@ -18,19 +18,26 @@ python3 "$PARTNER_DIR/scripts/run-claude-plan.py" \
 
 It resolves backend, model, and effort only from Partner config. Missing,
 unverified, or non-Claude roles fail before the CLI starts. It never chooses a
-replacement model. For an intentional route/alias mapping, explicitly provide
-`--expected-model` and record the requested, expected and observed model; an
-unexplained mismatch still fails. `--allow-unverified` is an explicit diagnostic override,
+replacement model. By default it follows the user's selected CLI route, allowing
+official Claude or third-party models behind the configured alias. Record the
+requested and observed models separately; missing observations remain unknown.
+Pass `--expected-model` only when the user requires a specific returned model;
+missing or mismatched observations then fail. Metadata `expected_model` is null
+when no model is pinned. `--allow-unverified` is an explicit diagnostic override,
 not a fallback. Changing backend, model, or effort invalidates inherited
 verification unless the higher-priority layer explicitly verifies that exact
 identity.
+External CC Switch changes may leave those fields unchanged: historical
+verification is not evidence that the newly selected provider has passed a run.
 
 ## Child Routing
 
 Child Claude processes default to `PARTNER_CLAUDE_ENV=clean`: remove inherited
-provider/session overrides and use normal CLI configuration. Set
-`PARTNER_CLAUDE_ENV=inherit` explicitly when the current route (for example CC
-Switch) must be inherited. Keep credentials out of packets, metadata and reports.
+provider/session overrides and use normal CLI configuration. When the user has
+chosen to follow the current route (for example CC Switch), invoke the runner
+with `PARTNER_CLAUDE_ENV=inherit` so provider overrides reach the child. Parent
+session markers are still stripped. Do not change the user's CLI routing settings;
+keep credentials out of packets, metadata and reports.
 An expected-model declaration documents mapping; it does not prove provider
 identity or billing. Record unavailable observations as unknown.
 
@@ -106,9 +113,10 @@ level-two sections in order:
 A conversational preamble, empty result, missing section, reordered section, or
 empty section is a `protocol_error`. The runner preserves the visible text in
 the checkpoint and writes recovery instructions, but does not create a plan
-file. A nominal success must also report the requested session id and expected
-returned model (the configured model unless explicitly mapped); observed values are persisted in metadata and mismatches fail
-closed.
+file. A nominal success must also report the requested session id. When
+`--expected-model` is supplied, that exact model must appear in observed models;
+otherwise model-name differences or missing model observations do not fail an
+otherwise valid plan. Observed values are persisted independently of acceptance.
 
 ## Artifacts
 

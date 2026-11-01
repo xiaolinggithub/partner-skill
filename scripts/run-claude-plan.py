@@ -988,7 +988,7 @@ def run_planner(
             failure_detail = (
                 "Claude reported a session id different from the requested session"
             )
-        elif (args.expected_model or identity.model) not in observed_models:
+        elif args.expected_model and args.expected_model not in observed_models:
             failure_kind = "protocol_error"
             failure_detail = (
                 "Claude reported success without the expected returned model"
@@ -1025,7 +1025,7 @@ def run_planner(
         "role": identity.role,
         "model": identity.model,
         "observed_models": observed_models,
-        "expected_model": args.expected_model or identity.model,
+        "expected_model": args.expected_model,
         "route_env": env.get("PARTNER_CLAUDE_ENV", "clean"),
         "billing_source": "unknown",
         "effort": identity.effort,
@@ -1143,7 +1143,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-budget-usd", type=budget_float, default=DEFAULT_MAX_BUDGET_USD
     )
-    parser.add_argument("--expected-model", help="Explicit returned model for an intentional alias or route mapping.")
+    parser.add_argument("--expected-model", help="Require this exact observed model; omitted follows the user's selected CLI route.")
     parser.add_argument("--allow-unverified", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
