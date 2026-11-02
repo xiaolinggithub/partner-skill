@@ -67,6 +67,8 @@ def static_check(entries: list[dict]) -> list[str]:
         for text in [entry["prompt"], *entry.get("expected_behavior", [])]:
             if RISKY.search(str(text)):
                 failures.append(f"{case_id}: risky command text outside must_not: {text!r}")
+        if 'requires_receipt' in entry and not isinstance(entry['requires_receipt'], bool):
+            failures.append(f"{case_id}: requires_receipt must be boolean")
         if entry.get("should_trigger") not in (True, False):
             failures.append(f"{case_id}: should_trigger must be true or false")
 
@@ -91,13 +93,16 @@ def live_check(entries: list[dict], agent_cmd: str) -> list[str]:
         except (OSError, subprocess.TimeoutExpired) as error:
             failures.append(f"{case_id}: agent command failed: {error}")
             continue
+        if result.returncode:
+            failures.append(f"{case_id}: agent command exited {result.returncode}")
+            continue
         output = result.stdout + result.stderr
         should_trigger = entry.get("should_trigger", True)
-        if not should_trigger:
+        if not should_trigger or not entry.get('requires_receipt', True):
             if RECEIPT_HEADER in output:
-                failures.append(f"{case_id}: expected no trigger, but a receipt was emitted")
+                failures.append(f"{case_id}: expected no collaboration receipt, but one was emitted")
             else:
-                print(f"PASS live {case_id} (correctly did not trigger)")
+                print(f"PASS live {case_id} (no collaboration receipt required)")
             continue
         if RECEIPT_HEADER not in output:
             failures.append(f"{case_id}: no Partner Session Receipt in output")

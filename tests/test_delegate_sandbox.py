@@ -98,6 +98,79 @@ class DelegateSandboxTests(unittest.TestCase):
         )
         return result
 
+    def collect_job(self, repo, name, state):
+        job = repo / '.partner/jobs' / name
+        job.mkdir(parents=True)
+        (job / 'meta').write_text('role=arbiter\nmodel=test\neffort=high\n')
+        (job / 'log.jsonl').write_text(json.dumps({'type': 'item.completed',
+            'item': {'type': 'agent_message', 'text': name + ' answer'}}) + '\n')
+        if state == 'RUNNING':
+            (job / 'pid').write_text(str(os.getpid()))
+        else:
+            (job / 'exit_code').write_text('0' if state == 'DONE' else '1')
+        if state == 'CANCELLED':
+            (job / 'cancelled').touch()
+        return job
+
+    def test_collect_returns_all_states_without_promoting_process_success(self):
+        _, repo, _, _, env = self.workspace()
+        names = ['job-' + state.lower() for state in ('DONE', 'FAILED', 'CANCELLED', 'RUNNING')]
+        for name, state in zip(names, ('DONE', 'FAILED', 'CANCELLED', 'RUNNING')):
+            self.collect_job(repo, name, state)
+        result = self.run_script(env, 'collect', *names, '--repo', str(repo), '--wait-seconds', '10')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertFalse(output['timed_out'])
+        self.assertEqual([row['state'] for row in output['jobs']], ['DONE', 'FAILED', 'CANCELLED', 'RUNNING'])
+        self.assertEqual(output['jobs'][0]['result']['acceptance'], 'pending')
+        self.assertNotIn('result', output['jobs'][-1])
+
+    def test_collect_wait_uses_one_deadline_and_leaves_jobs_running(self):
+        _, repo, _, _, env = self.workspace()
+        jobs = [self.collect_job(repo, name, 'RUNNING') for name in ('job-a', 'job-b')]
+        started = time.monotonic()
+        result = self.run_script(env, 'collect', 'job-a', 'job-b', '--repo', str(repo), '--wait-seconds', '1')
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)['timed_out'])
+        self.assertLess(elapsed, 2.5, 'deadline must not be applied separately to each job')
+        self.assertTrue(all(not (job / 'exit_code').exists() and not (job / 'cancelled').exists() for job in jobs))
+
+    def test_collect_returns_when_any_job_finishes(self):
+        import threading
+        _, repo, _, _, env = self.workspace()
+        first = self.collect_job(repo, 'job-first', 'RUNNING')
+        self.collect_job(repo, 'job-second', 'RUNNING')
+        timer = threading.Timer(0.2, lambda: (first / 'exit_code').write_text('0'))
+        timer.start()
+        self.addCleanup(timer.join)
+        started = time.monotonic()
+        result = self.run_script(env, 'collect', 'job-first', 'job-second', '--repo', str(repo), '--wait-seconds', '10')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertEqual([r['state'] for r in json.loads(result.stdout)['jobs']], ['DONE', 'RUNNING'])
+
+    def test_collect_keeps_other_results_when_one_artifact_is_missing(self):
+        _, repo, _, _, env = self.workspace()
+        job = self.collect_job(repo, 'job-broken', 'DONE')
+        (job / 'log.jsonl').unlink()
+        self.collect_job(repo, 'job-ok', 'DONE')
+        result = self.run_script(env, 'collect', 'job-broken', 'job-ok', '--repo', str(repo))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = json.loads(result.stdout)['jobs']
+        self.assertEqual(rows[0]['state'], 'DONE')
+        self.assertIn('collection_error', rows[0])
+        self.assertEqual(rows[1]['result']['agent_message'], 'job-ok answer')
+
+    def test_collect_rejects_invalid_inputs_without_dispatch(self):
+        _, repo, _, _, env = self.workspace()
+        for args in ([], ['../escape'], ['job-a', '--wait-seconds', '-1'],
+                     ['job-a', '--wait-seconds', '61'], ['job-a', 'job-a']):
+            with self.subTest(args=args):
+                result = self.run_script(env, 'collect', *args, '--repo', str(repo))
+                self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((repo / '.partner').exists())
+
     def test_relative_codex_path_survives_changing_to_target_repo(self):
         root, repo, prompt, fake_codex, env = self.workspace()
         env["PARTNER_CODEX_BIN"] = "./codex"

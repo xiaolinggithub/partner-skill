@@ -59,7 +59,7 @@ driver writing a run manifest; do not run collect/finalize concurrently on it.
 Start with step 1; the helper resolves configuration and paths. Do not list
 scripts, read helper source or rediscover CLI arguments during a normal run.
 
-1. `python3 "$PARTNER_DIR/scripts/partner-tryout.py" start --host <driver> --repo "$REPO"`
+1. `python3 "$PARTNER_DIR/scripts/partner-tryout.py" start --compact --host <driver> --repo "$REPO"`
    (optionally `--role <identity>`). This validates configuration before any
    dispatch, submits independent Codex jobs read-only, and returns `run` plus
    `native_agent` packets for Claude-backed roles. Each packet contains the
@@ -89,9 +89,11 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
    call, nonzero for a failure, and null when unknown. Copy measured elapsed time
    and observed model names only from actual tool/transcript evidence. Keep
    unavailable values null/empty; requested effort is not observed enforcement.
-3. `python3 "$PARTNER_DIR/scripts/partner-tryout.py" collect <run.json> --wait-seconds 60 --agent-transcript deep_reasoner=<native.jsonl>`.
+3. `python3 "$PARTNER_DIR/scripts/partner-tryout.py" collect <run.json> --compact --wait-seconds 60 --agent-transcript deep_reasoner=<native.jsonl>`.
    Use `--agent-result deep_reasoner=<native.json>` only for the explicit evidence
    fallback above. Never supply both forms for the same role.
+   Collection batches Codex jobs with one deadline and can return when any job
+   finishes. It reuses saved terminal evidence on subsequent calls.
    Repeat collect on the same run if jobs remain running. Omit agent-result when
    absent; multiple Claude roles accept repeated arguments. This command never
    resubmits, cancels, or relaxes acceptance. Failed/partial submissions retain
@@ -108,7 +110,15 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
    ignored for new runs and cannot veto or override the policy check.
    Legacy runs without a policy retain the original manual routing contract;
    do not backfill a policy into old evidence. Start a new run for the new rules.
-   Run `python3 "$PARTNER_DIR/scripts/partner-tryout.py" finalize <run.json> --judgments <judgments.json>`.
+   Once the judgments are ready and verification writes are authorized, run
+   `python3 "$PARTNER_DIR/scripts/partner-tryout.py" finalize <run.json> --judgments <judgments.json> --apply-verification --compact`.
+   This performs eligibility checks, scope-correct writes with the existing config
+   CLI/lock, readback, and one final report/receipt in a single call. It rechecks
+   routing before each write and uses config set --expect-identity to compare
+   backend/model/effort/scope again under the configuration lock. It skips confirmed, denied and ineligible rows.
+   `--compact` preserves answers, validation, observed models, timing and evidence
+   paths needed for acceptance; the full run record stays on disk. Omit it for
+   full JSON. It is available on start, collect and finalize.
    The flags below are the complete optional receipt inputs; no help/source
    discovery is needed. Write the judgments and finalize in one tool call when
    the host supports it, then give the concise fixed report from the returned data.
@@ -117,12 +127,19 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
    metadata, current verification, actual execution evidence and total run timing.
    Pass known `--claude-session`, `--new-claude-p` (from session-snapshot diff) and
    `--monitoring-level` evidence; absent session count remains unknown.
-5. For eligible rows, execute only the emitted `verification_command` under normal
-   permissions; it includes the role's actual `--scope`. Then finalize again to
-   read back the timestamp and routing. On denial, set `verification_write` to
-   `denied` and finalize without retrying the write through another path.
-   Denied rows emit no update command; later finalization preserves denial when
-   the judgment omits `verification_write`.
+5. Inspect the final verification states. Partial success is preserved: permission
+   failures become `denied`; other write/readback failures remain pending with a
+   visible `verification_error`. The helper never retries, escalates permissions,
+   changes scopes, or changes model/effort/backend to make a write succeed.
+   Repeated `--apply-verification` skips confirmed and previously denied rows,
+   even when the original judgments still say pending.
+   If the whole tool call is denied before it starts, mark the affected roles
+   `verification_write: denied` and run finalize **without** `--apply-verification`.
+   Never switch to another path to retry a denied write.
+   The original manual path remains available: finalize without the new flag
+   proposes scope-correct `verification_command` values; execute only authorized
+   commands and finalize again to read back. Denied rows emit no update command;
+   later finalization preserves denial when the judgment omits `verification_write`.
    Prior `verified=true` does not count as verification in this run. A changed
    route suppresses the update command; resolve that change before another run.
    The helper compares Partner config fields, not external CC Switch settings.
@@ -131,7 +148,8 @@ scripts, read helper source or rediscover CLI arguments during a normal run.
 
 The helper stores run evidence under `.partner/receipts/tryout-*/`; the existing
 delegate tool also stores its job evidence under `.partner/jobs/`. It never
-changes source files or routing configuration. Report preparation, the execution
+changes source files or routing configuration; explicit `--apply-verification`
+only updates eligible verification flags/timestamps under normal permissions. Report preparation, the execution
 window and finalization separately; do not confuse a faster collector with a
 measured end-to-end speed improvement.
 
@@ -156,9 +174,9 @@ or divergence below the generated report without rewriting its status fields.
   never report `all identities live` on a partial pass.
 - After a passing live row with its routing established, write `verified=true`
   + `verified_at` back to
-  the config via
-  the emitted scope-correct `verification_command` from finalize
-  (goes through the same lock as every config write).
+  the config with explicit `finalize --apply-verification`, or the emitted
+  scope-correct `verification_command` on the manual path (both use the same
+  config CLI and lock).
 - Save a Partner Session Receipt containing only roles actually run and their
   actual verification state. Partial or format failures must not become
   `verified: true`; show connectivity and format results separately.

@@ -7,6 +7,13 @@ GPT or another provider. Apply Workflow Depth in `SKILL.md` before starting
 these phases. Delegate only when the task benefits from separation, and verify
 all results. CLI selection alone says nothing about billing or savings.
 
+Apply the short-flow exit in `SKILL.md` **before** this adapter's preflight.
+No collaborating role means no peer probe, session snapshot, handoff, or
+collaboration receipt. The steps below apply only after collaboration is needed.
+Batch independent preflight commands in one tool call; reuse monitoring capability
+within this task unless the CLI/permission environment changes. Re-read routing
+before dispatch and verification writes.
+
 All helper scripts live in `$PARTNER_DIR` (see Tool Location in `SKILL.md`).
 Job state lives under `<repo>/.partner/jobs/`.
 
@@ -153,13 +160,17 @@ claude-backend identity through the wrong CLI.
 
 ## Phase 3 — Monitor (loop)
 
-- Short single job (expected under ~5 minutes): block on it —
-  `bash "$PARTNER_DIR/scripts/delegate-codex.sh" status <jobId> --repo "$REPO" --wait --timeout 300`.
-- Long or multiple jobs: set up the built-in `/loop` skill at a 5-minute
-  interval with a prompt like: read `.partner/goal.md`, run
-  `delegate-codex.sh status` for every running jobId (tail the job's
-  `log.jsonl` for the last event), update task statuses in the goal file,
-  and when no job is left running, stop the loop and continue with Phase 4.
+- Prefer the host's native completion notifications for native agents.
+- For Codex background jobs, collect all outstanding IDs in one call:
+  `bash "$PARTNER_DIR/scripts/delegate-codex.sh" collect <jobId>... --repo "$REPO" --wait-seconds 60`.
+  The JSON snapshot returns when any job is terminal or one shared deadline
+  expires. It includes each job's state, terminal result or `collection_error`,
+  and `timed_out`. Repeat only for unfinished IDs; never add a fixed five-minute
+  delay after completion. Do independent driver work while jobs run when possible.
+- Read collection errors explicitly; missing artifacts do not establish success.
+  A terminal row includes the same evidence as `result --json`; do not fetch it
+  again merely to move to the review phase. Existing `status`/`result` remain
+  available for diagnostics and older callers.
 - For an explicit task runtime limit, pass `--wall-timeout <seconds>` on submit.
   The runner records timing/failure in `execution.json` and cleans up its process
   group on expiry. Explicit `--writable` jobs hold a workspace write lock; a busy
@@ -182,8 +193,9 @@ claude-backend identity through the wrong CLI.
 
 ## Phase 4 — Full Review Gate
 
-- Collect each finished job:
-  `bash "$PARTNER_DIR/scripts/delegate-codex.sh" result <jobId> --repo "$REPO" --json`.
+- Use terminal results already returned by batch `collect`. For older callers,
+  `bash "$PARTNER_DIR/scripts/delegate-codex.sh" result <jobId> --repo "$REPO" --json`
+  remains available.
   Use `execution.returncode` and `execution.elapsed_seconds` for process outcome
   and actual runtime; missing evidence stays unknown. `meta` is key/value text,
   not JSON. Keep requested/observed models separate. For fixed identity tryouts,

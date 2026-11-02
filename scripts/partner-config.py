@@ -764,6 +764,7 @@ def build_parser() -> argparse.ArgumentParser:
     verified.add_argument("--unverified", dest="verified", action="store_false")
     set_parser.set_defaults(verified=None)
     set_parser.add_argument("--verified-at")
+    set_parser.add_argument("--expect-identity", help="For verification-only writes: JSON backend/model/effort/scope checked under the config lock.")
 
     resolve_parser = subparsers.add_parser("resolve", help="Resolve session > project > global > defaults.")
     resolve_parser.add_argument("--override", action="append", default=[], metavar="IDENTITY.FIELD=VALUE")
@@ -806,6 +807,35 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(value)
             return 0
         if args.command == "set":
+            if args.expect_identity is not None:
+                if args.verified is not True or not args.verified_at or any(
+                        value is not None for value in (args.backend, args.model, args.effort)):
+                    raise ConfigError("expect-identity requires a verification-only write with verified-at")
+                try:
+                    expected = json.loads(args.expect_identity)
+                except ValueError as error:
+                    raise ConfigError("invalid expected identity JSON") from error
+                if not isinstance(expected, dict) or set(expected) != {"backend", "model", "effort", "scope"}:
+                    raise ConfigError("expected identity requires backend/model/effort/scope")
+                with ConfigLock(path, owner_host=args.host):
+                    text = _read_text(path)
+                    data = validate_config(text, args.host, path=path)
+                    live = resolve_config(args.repo, args.host)["hosts"][args.host]["identities"].get(args.role, {})
+                    project = project_config_path(args.repo)
+                    project_roles = (validate_config(_read_text(project), args.host, path=project)
+                                     ["hosts"][args.host]["identities"] if project.is_file() else {})
+                    scope = "project" if args.role in project_roles else "global"
+                    actual = {key: live.get(key) for key in ("backend", "model", "effort")}
+                    actual["scope"] = scope
+                    if actual != expected or scope != args.scope:
+                        raise ConfigError("identity or scope changed before verification write")
+                    identities = data["hosts"][args.host]["identities"]
+                    if args.role not in identities:
+                        raise ConfigError("identity no longer exists in the selected scope")
+                    identities[args.role].update(verified=True, verified_at=args.verified_at)
+                    atomic_write(path, update_host(text, args.host, identities, path=path))
+                print(path)
+                return 0
             identities = data["hosts"][args.host]["identities"]
             current = dict(identities.get(args.role, {}))
             updates = {

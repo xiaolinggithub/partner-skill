@@ -30,6 +30,7 @@ Usage:
                     [--read-only|--writable] [--wall-timeout <seconds>] [--dry-run]
   delegate-codex.sh status <jobId> --repo <path> [--wait] [--timeout <seconds>]
   delegate-codex.sh result <jobId> --repo <path> [--json]
+  delegate-codex.sh collect <jobId>... --repo <path> [--wait-seconds <0..60>]
   delegate-codex.sh resume <jobId> --repo <path> --prompt-file <file>
                     [--read-only|--writable]
   delegate-codex.sh cancel <jobId> --repo <path>
@@ -56,6 +57,9 @@ A wait timeout leaves the job running. --wall-timeout terminates its process
 group. DONE means process success, never acceptance; result --json includes
 acceptance=pending and execution evidence. Explicit writable jobs are serialized
 per repository; use separate worktrees for concurrent writers.
+collect returns a JSON snapshot as soon as any job is terminal, or the shared
+wait expires. Observed failures stay in the snapshot; invalid arguments fail.
+A collect timeout never cancels or resubmits a job.
 USAGE
 }
 
@@ -528,6 +532,63 @@ else:
 PY
 }
 
+cmd_collect() {
+  # Reuse status/result so cancellation, crash and result semantics stay shared.
+  python3 - "$SCRIPT_DIR/delegate-codex.sh" "$@" <<'PYCOLLECT'
+import argparse, json, re, subprocess, sys, time
+from pathlib import Path
+
+script = sys.argv[1]
+parser = argparse.ArgumentParser(description='Collect jobs with one bounded wait.')
+parser.add_argument('jobs', nargs='+')
+parser.add_argument('--repo', type=Path, required=True)
+parser.add_argument('--wait-seconds', type=int, default=0, choices=range(61), metavar='0..60')
+args = parser.parse_args(sys.argv[2:])
+if len(set(args.jobs)) != len(args.jobs) or any(
+        not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', job) for job in args.jobs):
+    parser.error('job IDs must be distinct valid names')
+if not args.repo.is_dir():
+    parser.error('repo must be an existing directory')
+
+def call(command, job, *extra):
+    return subprocess.run(['bash', script, command, job, '--repo', str(args.repo), *extra],
+                          capture_output=True, text=True)
+
+deadline = time.monotonic() + args.wait_seconds
+while True:
+    rows = []
+    for job in args.jobs:
+        row = {'job_id': job}
+        try:
+            status = call('status', job)
+            states = re.findall(r'^state: (RUNNING|DONE|FAILED|CANCELLED)$', status.stdout, re.M)
+            if len(states) != 1:
+                raise ValueError(status.stderr.strip() or 'missing job state')
+            row['state'] = states[0]
+        except (OSError, ValueError) as error:
+            row.update(state='collection_failed', collection_error=str(error))
+        rows.append(row)
+    terminal = any(row['state'] != 'RUNNING' for row in rows)
+    if terminal or time.monotonic() >= deadline:
+        break
+    time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+for row in rows:
+    if row['state'] in ('DONE', 'FAILED', 'CANCELLED'):
+        try:
+            result = call('result', row['job_id'], '--json')
+            if result.returncode:
+                raise ValueError(result.stderr.strip() or result.stdout.strip() or 'missing result')
+            row['result'] = json.loads(result.stdout)
+            if not isinstance(row['result'], dict):
+                raise ValueError('result must be a JSON object')
+        except (OSError, ValueError) as error:
+            row.pop('result', None)
+            row['collection_error'] = str(error)
+print(json.dumps({'jobs': rows, 'timed_out': bool(args.wait_seconds and not terminal)}, ensure_ascii=False))
+PYCOLLECT
+}
+
 cmd_cancel() {
   local JOB_ID="$1"; shift
   while [ "$#" -gt 0 ]; do
@@ -579,6 +640,7 @@ case "$COMMAND" in
     JOB_ID_ARG="$1"; shift
     "cmd_$COMMAND" "$JOB_ID_ARG" "$@"
     ;;
+  collect) cmd_collect "$@" ;;
   list) cmd_list "$@" ;;
   -h|--help|help) usage ;;
   *) usage; die "unknown command: $COMMAND" ;;

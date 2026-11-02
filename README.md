@@ -54,6 +54,8 @@ bash install.sh --target claude
 <p><a href="assets/config-switch-demo.mp4">打开 7 秒完整 MP4</a></p>
 </div>
 
+明确的小任务直接由主控完成并检查，跳过协作预检。协作任务可批量等待结果；已授权的试跑回写、复核和报告可一次完成。模型配置与验收标准保持不变。
+
 ## Showcase
 
 **Showcase 1：同会话 UI polish**

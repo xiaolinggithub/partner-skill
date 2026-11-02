@@ -8,6 +8,13 @@ Host detection, shared routing rules, the validation gate, monitoring
 signals, and the Partner Session Receipt contract live in `SKILL.md`;
 this file holds only the Codex-driven flow itself.
 
+Apply the short-flow exit in `SKILL.md` **before** this adapter's preflight.
+No collaborating role means no peer probe, session snapshot, handoff, or
+collaboration receipt. The steps below apply only after collaboration is needed.
+Batch independent preflight commands in one tool call; reuse monitoring capability
+within this task unless the CLI/permission environment changes. Re-read routing
+before dispatch and verification writes.
+
 All helper scripts live in `$PARTNER_DIR` (see Tool Location in `SKILL.md`).
 
 ## Default Flow

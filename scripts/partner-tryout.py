@@ -11,7 +11,6 @@ import shlex
 import subprocess
 import sys
 import tempfile
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -188,55 +187,66 @@ def collect(path, wait_seconds, agent_results, agent_transcripts=None):
         raise ValueError("use one native evidence source per role")
     if (set(agent_results) | set(agent_transcripts)) - set(run["roles"]):
         raise ValueError("agent-result names a role outside this run")
-    deadline = time.monotonic() + wait_seconds
-    while True:
-        running = False
-        for role, row in run["roles"].items():
-            if role in agent_results or role in agent_transcripts:
-                if row["backend"] != "claude":
-                    raise ValueError("agent-result cannot replace a Codex job")
-                evidence = (native_transcript(Path(agent_transcripts[role]), role)
-                            if role in agent_transcripts else json.loads(Path(agent_results[role]).read_text()))
-                if not isinstance(evidence.get("completed"), bool) or not evidence.get("source"):
-                    raise ValueError("native evidence requires completed boolean and source")
-                evidence.setdefault("execution", {}).setdefault("elapsed_seconds", None)
-                evidence.setdefault("observed_models", [])
-                row.update(evidence=evidence, state="DONE" if evidence["completed"] else "RUNNING")
-            elif row["backend"] == "codex":
-                if not row.get("job_id"):
-                    submission = path.parent / (role + ".submission")
-                    job = submission.read_text().strip() if submission.exists() else ""
-                    if re.fullmatch(r"job-[A-Za-z0-9._-]+", job):
-                        row["job_id"] = job
-                if row.get("job_id"):
-                    args = [row["job_id"], "--repo", run["repo"]]
-                    try:
-                        status = delegate(["status", *args])
-                        states = re.findall(r"(?m)^state: (RUNNING|DONE|FAILED|CANCELLED)$", status)
-                        if len(states) != 1:
-                            raise ValueError("missing terminal/running state")
-                        row["state"] = states[0]
-                        if row["state"] != "RUNNING":
-                            row["evidence"] = json.loads(delegate(["result", *args, "--json"]))
-                        row.pop("collection_error", None)
-                    except (OSError, ValueError, RuntimeError) as error:
-                        row.update(state="collection_failed", collection_error=str(error))
-            evidence = row.get("evidence", {})
-            returncode = evidence.get("execution", {}).get("returncode")
-            succeeded = (row["state"] == "DONE" and type(returncode) is int and returncode == 0
-                         and (row["backend"] != "claude" or evidence.get("completed") is True))
-            row["process_succeeded"] = bool(succeeded)
-            row["passed"] = False
-            if role == "fast_worker" and "agent_message" in evidence:
-                row["validation"] = validate_fast_worker(
-                    evidence["agent_message"], allow_fences=row.get("accept_fenced_json") is True)
-                row["passed"] = succeeded and row["validation"]["passed"]
-            running |= row["state"] == "RUNNING" and row["backend"] == "codex"
-        run["collected_at"] = utc_now()
-        save(path, run)
-        if not running or time.monotonic() >= deadline:
-            return run
-        time.sleep(min(1, max(0, deadline - time.monotonic())))
+    jobs = {}
+    for role, row in run['roles'].items():
+        if role in agent_results or role in agent_transcripts:
+            if row['backend'] != 'claude':
+                raise ValueError('agent-result cannot replace a Codex job')
+            evidence = (native_transcript(Path(agent_transcripts[role]), role)
+                        if role in agent_transcripts else json.loads(Path(agent_results[role]).read_text()))
+            if not isinstance(evidence.get('completed'), bool) or not evidence.get('source'):
+                raise ValueError('native evidence requires completed boolean and source')
+            evidence.setdefault('execution', {}).setdefault('elapsed_seconds', None)
+            evidence.setdefault('observed_models', [])
+            row.update(evidence=evidence, state='DONE' if evidence['completed'] else 'RUNNING')
+        elif row['backend'] == 'codex':
+            if not row.get('job_id'):
+                submission = path.parent / (role + '.submission')
+                job = submission.read_text().strip() if submission.exists() else ''
+                if re.fullmatch(r'job-[A-Za-z0-9._-]+', job):
+                    row['job_id'] = job
+            if row.get('job_id'):
+                # Terminal evidence is immutable; do not wait on it again with unfinished jobs.
+                if row.get('state') not in ('DONE', 'FAILED', 'CANCELLED') or not row.get('evidence'):
+                    jobs[row['job_id']] = row
+    if jobs:
+        try:
+            batch = json.loads(delegate(['collect', *jobs, '--repo', run['repo'],
+                                         '--wait-seconds', wait_seconds]))
+            observed = batch['jobs']
+            if (len(observed) != len(jobs) or
+                    {item['job_id'] for item in observed} != set(jobs)):
+                raise ValueError('collection must contain each requested job exactly once')
+            for item in observed:
+                row = jobs[item['job_id']]
+                if item.get('collection_error'):
+                    row.update(state='collection_failed', collection_error=item['collection_error'])
+                elif item.get('state') not in ('RUNNING', 'DONE', 'FAILED', 'CANCELLED'):
+                    row.update(state='collection_failed', collection_error='missing job state')
+                elif item['state'] != 'RUNNING' and not isinstance(item.get('result'), dict):
+                    row.update(state='collection_failed', collection_error='missing terminal result')
+                else:
+                    row['state'] = item['state']
+                    if 'result' in item:
+                        row['evidence'] = item['result']
+                    row.pop('collection_error', None)
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+            for row in jobs.values():
+                row.update(state='collection_failed', collection_error=str(error))
+    for role, row in run['roles'].items():
+        evidence = row.get('evidence', {})
+        returncode = evidence.get('execution', {}).get('returncode')
+        succeeded = (row['state'] == 'DONE' and type(returncode) is int and returncode == 0
+                     and (row['backend'] != 'claude' or evidence.get('completed') is True))
+        row['process_succeeded'] = bool(succeeded)
+        row['passed'] = False
+        if role == 'fast_worker' and 'agent_message' in evidence:
+            row['validation'] = validate_fast_worker(
+                evidence['agent_message'], allow_fences=row.get('accept_fenced_json') is True)
+            row['passed'] = succeeded and row['validation']['passed']
+    run['collected_at'] = utc_now()
+    save(path, run)
+    return run
 
 
 def reject_constant(value: str):
@@ -311,13 +321,13 @@ def run_summary(run):
         'checks': '; '.join(f"{role}={'PASS' if row['passed'] else 'FAIL/PENDING'}"
                            for role, row in run['roles'].items()),
         'anomalies': '; '.join(f"{role}: verification_write={row['verification_write']}"
+                              + (f"; error={' '.join(row['verification_error'].split())}" if row.get('verification_error') else '')
                               for role, row in run['roles'].items()
                               if row['verification_write'] != 'confirmed') or 'none',
     }
 
 
-def finalize(path, decisions):
-    run = json.loads(path.read_text())
+def assess(run, decisions):
     if not isinstance(decisions, dict) or set(decisions) - set(run['roles']):
         raise ValueError('judgments must be an object naming only roles in this run')
     current = {}
@@ -364,8 +374,55 @@ def finalize(path, decisions):
                     sys.executable, str(SCRIPT_DIR / 'partner-config.py'), '--host', run['host'],
                     '--repo', run['repo'], '--scope', row['scope'], 'set', '--role', role,
                     '--verified', '--verified-at', utc_now()])
+        if row['verified_this_run']:
+            row.pop('verification_error', None)
         if not row['passed'] and row['verification_write'] != 'denied':
             row['verification_write'] = 'not_eligible'
+
+
+def finalize(path, decisions, apply_verification=False):
+    run = json.loads(path.read_text())
+    assess(run, decisions)
+    if apply_verification:
+        decisions = {role: dict(value) for role, value in decisions.items()}
+        # A reused pending judgment cannot re-authorize a previously denied write.
+        saved = json.loads(path.read_text())
+        for role, row in saved['roles'].items():
+            if row.get('verification_write') == 'denied':
+                decisions.setdefault(role, {})['verification_write'] = 'denied'
+        attempted = set()
+        for role in run['roles']:
+            assess(run, decisions)  # Re-read routing immediately before each possible write.
+            row = run['roles'][role]
+            command = row.get('verification_command')
+            if not command:
+                continue
+            row.pop('verification_error', None)
+            save(path, run)
+            attempted.add(role)
+            try:
+                expected = {key: row[key] for key in ('backend', 'model', 'effort', 'scope')}
+                result = subprocess.run([*shlex.split(command), '--expect-identity', json.dumps(expected)],
+                                        capture_output=True, text=True)
+                if result.returncode:
+                    error = (result.stderr or result.stdout).strip() or f'config write exited {result.returncode}'
+                    row['verification_error'] = error
+                    if re.search(r'PermissionError|permission denied|operation not permitted', error, re.I):
+                        decisions.setdefault(role, {})['verification_write'] = 'denied'
+            except OSError as error:
+                row['verification_error'] = str(error)
+                if isinstance(error, PermissionError):
+                    decisions.setdefault(role, {})['verification_write'] = 'denied'
+            if decisions.get(role, {}).get('verification_write') == 'denied':
+                row['verification_write'] = 'denied'
+                row.pop('verification_command', None)
+            save(path, run)
+        assess(run, decisions)
+        for role, row in run['roles'].items():
+            if row['verified_this_run']:
+                row.pop('verification_error', None)
+            elif role in attempted and not row.get('verification_error'):
+                row['verification_error'] = 'config write was not confirmed by readback'
     run['finalized_at'] = utc_now()
     run['elapsed_seconds'] = (datetime.fromisoformat(run['finalized_at']) -
                               datetime.fromisoformat(run['started_at'])).total_seconds()
@@ -407,6 +464,23 @@ def make_receipt(path, run, args):
     return str(receipt)
 
 
+def compact_output(path, run):
+    output = {key: run[key] for key in ('host', 'repo', 'started_at', 'collected_at',
+              'finalized_at', 'elapsed_seconds', 'report', 'summary', 'receipt', 'config_error') if key in run}
+    output.update(run=str(path.resolve()), roles={})
+    for role, row in run['roles'].items():
+        compact = {key: row[key] for key in ('backend', 'model', 'effort', 'scope', 'state',
+            'job_id', 'native_agent', 'routing_policy', 'process_succeeded', 'passed', 'validation',
+            'routing_established', 'routing_reason', 'verified_this_run', 'verification_write',
+            'verification_command', 'verification_error', 'collection_error', 'error') if key in row}
+        evidence = row.get('evidence', {})
+        compact['evidence'] = {key: evidence[key] for key in ('agent_message', 'observed_models',
+            'execution', 'commands', 'source', 'completed') if key in evidence}
+        compact['evidence_file'] = str(path.resolve())
+        output['roles'][role] = compact
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -424,6 +498,11 @@ def main():
     finish = sub.add_parser('finalize', help='Record acceptance, generate explicit update commands and a receipt.')
     finish.add_argument('run', type=Path)
     finish.add_argument('--judgments', type=Path, required=True)
+    finish.add_argument('--apply-verification', action='store_true',
+                        help='Write eligible verification flags with normal permissions, then read back.')
+    for command_parser in (begin, gather, finish):
+        command_parser.add_argument('--compact', action='store_true',
+                                    help='Print decision evidence and artifact paths; keep full records on disk.')
     finish.add_argument('--claude-session', default='none')
     finish.add_argument('--new-claude-p', default='unknown')
     finish.add_argument('--monitoring-level', choices=('full', 'degraded', 'none', 'unknown'))
@@ -445,10 +524,11 @@ def main():
             run = collect(path, args.wait_seconds, dict(entries), dict(transcripts))
         else:
             path = args.run
-            run = finalize(path, json.loads(args.judgments.read_text()))
+            run = finalize(path, json.loads(args.judgments.read_text()), args.apply_verification)
             run['receipt'] = make_receipt(path, run, args)
             save(path, run)
-        print(json.dumps({'run': str(path.resolve()), **run}, ensure_ascii=False, indent=2))
+        output = compact_output(path, run) if args.compact else {'run': str(path.resolve()), **run}
+        print(json.dumps(output, ensure_ascii=False, indent=2))
         return 0
     except (OSError, ValueError, RuntimeError, config.ConfigError) as error:
         print(f'ERROR: {error}', file=sys.stderr)

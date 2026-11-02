@@ -167,8 +167,8 @@
     "expected_behavior": [
       "Detect Direction B (Claude-driven) and follow references/claude-driven.md.",
       "Write the refined plan and task split into .partner/goal.md with verifiable acceptance criteria per task.",
-      "Delegate mechanical tasks to Codex via scripts/delegate-codex.sh background jobs at effort high, recording jobIds in the goal file.",
-      "Monitor long-running jobs with a loop and update task statuses from job state, not guesses.",
+      "Delegate mechanical tasks to Codex via scripts/delegate-codex.sh background jobs using the configured model and effort, recording jobIds in the goal file.",
+      "Collect outstanding jobs in one bounded batch, use native completion signals when available, and update statuses from evidence.",
       "Full-review every Codex diff before accepting it, with at most two bounded fix rounds via delegate-codex.sh resume.",
       "End with a Partner Session Receipt where direction is claude-driven and codex_jobs counts all delegated jobs."
     ],
@@ -553,6 +553,52 @@
     "must_not": [
       "Automatically cancel solely because JSONL is quiet.",
       "Submit a duplicate job before establishing what happened."
+    ]
+  },
+  {
+    "id": "small-inline-no-collaboration-receipt",
+    "prompt": "搭子，把 README 中 recieve 拼写改成 receive，核对这一处即可，不需要其他代理。",
+    "should_trigger": true,
+    "requires_receipt": false,
+    "expected_behavior": [
+      "Apply Workflow Depth before loading the host adapter or running peer preflight.",
+      "Fix the typo inline and check the scoped diff.",
+      "Report the outcome without a collaboration receipt."
+    ],
+    "must_not": [
+      "Probe the peer CLI or snapshot sessions without a collaborating role.",
+      "Create a handoff or goal file for this one-line change.",
+      "Delegate or lower the configured model to speed up the task."
+    ]
+  },
+  {
+    "id": "batch-collect-no-fixed-delay",
+    "prompt": "搭子，两个后台任务正在跑，完成的先验收，别等固定轮询间隔。",
+    "should_trigger": true,
+    "expected_behavior": [
+      "Use delegate-codex.sh collect for outstanding jobs with one wait of at most 60 seconds.",
+      "Read terminal results from the returned JSON; wait only for unfinished jobs next time.",
+      "Keep process completion separate from task acceptance."
+    ],
+    "must_not": [
+      "Wait five minutes before inspecting a completed job.",
+      "Cancel or resubmit work because the caller wait timed out.",
+      "Treat a missing result as successful acceptance."
+    ]
+  },
+  {
+    "id": "tryout-authorized-single-close",
+    "prompt": "搭子，试跑完成后按当前权限回写验证状态，给我最终报告。",
+    "should_trigger": true,
+    "expected_behavior": [
+      "Judge reasoning answers once, then use finalize --apply-verification --compact for authorized writes, readback, report and receipt.",
+      "Keep partial success, deny blocked writes, and show other write errors as pending.",
+      "If the whole apply call is denied, use non-applying finalize to record denial."
+    ],
+    "must_not": [
+      "Retry a denied write via a different permission or scope.",
+      "Mark verified from process exit alone.",
+      "Discard full evidence when printing compact output."
     ]
   }
 ]

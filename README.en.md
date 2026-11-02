@@ -54,6 +54,8 @@ Before first real use, say "搭子，配置" (Partner, configure). Partner opens
 <p><a href="assets/config-switch-demo.mp4">Open the complete 7-second MP4</a></p>
 </div>
 
+Clear small tasks stay with the driver and skip collaboration preflight. Collaborating tasks can collect jobs in one bounded wait; authorized tryout writeback, readback, and reporting finish in one call. Model configuration and acceptance standards stay unchanged.
+
 ## Showcase
 
 **Showcase 1: same-session UI polish**

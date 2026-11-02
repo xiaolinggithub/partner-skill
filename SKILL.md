@@ -29,6 +29,15 @@ an operating mode:
 | Cross-module or uncertain work | Compact plan, justified split, integrated acceptance; use idea-king when the split or premise needs challenge. |
 | High-risk change or contentious decision | Independent review; use blind arbitration for disputed decisions, not every task. |
 
+**Short-flow exit comes before adapter preflight.** If no collaboration role is
+needed, implement inline, run the relevant check, and report the result. Do not
+load a host adapter, probe the peer CLI, snapshot sessions, create a handoff, or
+emit a collaboration receipt. An explicit request to use another agent still
+requires that collaboration. For collaborating tasks, batch independent preflight
+checks in one tool call and reuse the measured monitoring capability for this
+task; recheck when the CLI/permission environment changes. Resolve current
+routing before each dispatch and verification write.
+
 Keep implementation and investigation distinct. A read-only request never
 becomes a fix, production replay, resend, or deployment. Full acceptance means
 checking the original requirements and evidence, not running every phase.
@@ -45,7 +54,7 @@ Partner is one Core (this file) plus one host adapter. Decide the host once at t
 - An unknown runtime runs Core-only until capabilities are established. A shared `~/.agents` directory or symlink does not override a known Claude Code/Codex runtime.
 - Probing the peer CLI (`codex --version`, `check-claude-cli.sh`) only tells you what the other side can do; it never decides which adapter you load.
 
-Then load the matching adapter:
+Only for tasks that need collaboration, load the matching adapter:
 
 - **Direction A — Codex-driven**: this file is loaded by Codex; Codex orchestrates and Claude Code is the high-value planning/polish/review agent. Read `references/codex-driven.md` and follow its Default Flow, Session Strategy, and Permission Policy.
 - **Direction B — Claude-driven**: this file is loaded inside Claude Code and the user asks to delegate work to Codex ("双向搭子", "分工给 codex", "让 codex 做", "codex 后台跑"). Claude plans and splits the work, delegates to Codex via `bash "$PARTNER_DIR/scripts/delegate-codex.sh"` background jobs, monitors with a loop, and full-reviews the result before accepting. Read `references/claude-driven.md` and follow its five phases; the shared prompting rules live in `references/fable5-principles.md` and the wrap-up memory rules in `references/memory-protocol.md`.
@@ -70,7 +79,7 @@ freely mixed across vendors. Their values live only in
 (global) — schema in `docs/config-schema.md`; never duplicate them into
 prompts or docs. On "搭子，试跑", run the identity tryout in
 `references/tryout.md`: each identity executes one micro-task and the
-report distinguishes requested and observed models, actual elapsed time, and output validity. Use `scripts/partner-tryout.py start/collect/finalize` for fixed orchestration, content validation and routing-policy checks; the driver judges reasoning content. Pass the working project directory as `--repo`, never its `.partner` storage directory. Deliver finalize's generated `report` and keep its anomaly status intact. A dry-run configuration check is not a live verification.
+report distinguishes requested and observed models, actual elapsed time, and output validity. Use `scripts/partner-tryout.py start/collect/finalize` for fixed orchestration, content validation and routing-policy checks; the driver judges reasoning content. Use `--compact` for decision evidence, and authorized `finalize --apply-verification` for writeback plus readback in one call. Pass the working project directory as `--repo`, never its `.partner` storage directory. Deliver finalize's generated `report` and keep its anomaly status intact. A dry-run configuration check is not a live verification.
 
 ## Tool Location
 
